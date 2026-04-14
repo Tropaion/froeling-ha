@@ -151,10 +151,18 @@ The integration implements the proprietary binary protocol used by Fröling Lamb
 - Check the HA diagnostics panel for the raw sensor specs (factor, unit)
 - Some sensors may report 0 when the heater is in standby
 
-## Credits
+## Attribution & Acknowledgements
 
-- Protocol reverse-engineered by [Jörg Wendel](https://github.com/horchi) in the [linux-p4d](https://github.com/horchi/linux-p4d) project
+This integration would not be possible without the **[linux-p4d](https://github.com/horchi/linux-p4d)** project by **[Jörg Wendel (@horchi)](https://github.com/horchi)**, which reverse-engineered the proprietary binary protocol used by Fröling Lambdatronic controllers on the COM1 service interface.
+
+The `pyfroeling` protocol library bundled in this integration is a clean-room Python reimplementation of the protocol as documented in the linux-p4d source code (specifically `p4io.c`, `service.h`, `service.c`, and `lib/common.c`). No code was copied from linux-p4d -- only the protocol specification (frame format, byte escaping rules, CRC algorithm, command codes, and response structures) was referenced.
+
+linux-p4d is licensed under the [GNU General Public License v2.0](https://github.com/horchi/linux-p4d/blob/master/LICENSE).
+
+### Additional Credits
+
 - Built with [Claude Code](https://claude.ai/claude-code)
+- Inspired by the [ha_froeling_lambdatronic_modbus](https://github.com/GyroGearl00se/ha_froeling_lambdatronic_modbus) and [pe1-modbus](https://github.com/smokyflex/pe1-modbus) community integrations
 
 ## License
 

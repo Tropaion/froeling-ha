@@ -308,58 +308,16 @@ class FroelingClient:
 
         for spec in specs:
             try:
-                menu_type = spec.menu_type
-
-                if menu_type in (MenuStructType.MESSWERT, MenuStructType.MESSWERT1):
-                    # Standard measured sensor value.
-                    sv = await self.get_value(spec.address, spec)
-                    results[spec.address] = sv
-
-                elif menu_type == MenuStructType.DIG_OUT:
-                    # Digital output: fetch via GET_DIG_OUT.
-                    io = await self._get_io(spec.address, Command.GET_DIG_OUT)
-                    results[spec.address] = SensorValue(
-                        address     = spec.address,
-                        value       = float(io.state),
-                        raw_value   = io.state,
-                        factor      = 1,
-                        unit        = spec.unit,
-                        title       = spec.title,
-                        sensor_type = "DIG_OUT",
-                    )
-
-                elif menu_type == MenuStructType.ANL_OUT:
-                    # Analogue output: fetch via GET_ANL_OUT.
-                    io = await self._get_io(spec.address, Command.GET_ANL_OUT)
-                    results[spec.address] = SensorValue(
-                        address     = spec.address,
-                        value       = float(io.state),
-                        raw_value   = io.state,
-                        factor      = 1,
-                        unit        = spec.unit,
-                        title       = spec.title,
-                        sensor_type = "ANL_OUT",
-                    )
-
-                elif menu_type == MenuStructType.DIG_IN:
-                    # Digital input: fetch via GET_DIG_IN.
-                    io = await self._get_io(spec.address, Command.GET_DIG_IN)
-                    results[spec.address] = SensorValue(
-                        address     = spec.address,
-                        value       = float(io.state),
-                        raw_value   = io.state,
-                        factor      = 1,
-                        unit        = spec.unit,
-                        title       = spec.title,
-                        sensor_type = "DIG_IN",
-                    )
-
-                else:
-                    # Unknown / unsupported menu type – skip silently.
-                    _log.debug(
-                        "Skipping address 0x%04X: unsupported menu_type 0x%02X",
-                        spec.address, menu_type,
-                    )
+                # ALL sensors discovered via cmdGetValueListFirst/Next are
+                # readable with cmdGetValue (0x30), regardless of their
+                # menu_type.  This matches linux-p4d's behaviour in
+                # specific.c:initValueFacts() where every ValueSpec entry
+                # is stored as type "VA" and read with request->getValue().
+                #
+                # The menu_type field is metadata about the sensor's role
+                # in the heater's menu structure, NOT the read method.
+                sv = await self.get_value(spec.address, spec)
+                results[spec.address] = sv
 
             except (FroelingConnectionError, FroelingProtocolError) as exc:
                 # Log and continue so one bad sensor doesn't abort the batch.

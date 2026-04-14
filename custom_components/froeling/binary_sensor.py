@@ -59,35 +59,10 @@ async def async_setup_entry(
 
     entities: list[FroelingEntity] = []
 
-    # --- Dynamic digital I/O sensors from discovered specs ---
-    for spec in coordinator.data.specs:
-        menu_type = spec.menu_type
-
-        if menu_type == MenuStructType.DIG_OUT:
-            # Digital output (relay, pump, fan, etc.).
-            # device_class=RUNNING reflects whether the output channel is active.
-            entities.append(
-                FroelingDigitalSensor(
-                    coordinator,
-                    address=spec.address,
-                    name=spec.title,
-                    sensor_type="DO",
-                    device_class=BinarySensorDeviceClass.RUNNING,
-                )
-            )
-
-        elif menu_type == MenuStructType.DIG_IN:
-            # Digital input (flow switch, door contact, pressure switch, …).
-            # device_class=SAFETY is appropriate for limit-switch style inputs.
-            entities.append(
-                FroelingDigitalSensor(
-                    coordinator,
-                    address=spec.address,
-                    name=spec.title,
-                    sensor_type="DI",
-                    device_class=BinarySensorDeviceClass.SAFETY,
-                )
-            )
+    # NOTE: Digital I/O sensors (DIG_OUT, DIG_IN) are not created as binary
+    # sensors because ALL discovered ValueSpecs are read with cmdGetValue (0x30)
+    # and exposed as numeric sensors on the sensor platform.  The binary_sensor
+    # platform only provides the overall heater fault indicator.
 
     # --- Fixed fault-indicator binary sensor ---
     entities.append(FroelingErrorBinarySensor(coordinator))

@@ -30,7 +30,6 @@ from .const import UNIT_DEVICE_CLASS_MAP
 from .coordinator import FroelingCoordinator
 from .entity import FroelingEntity
 from .pyfroeling import ErrorState
-from .pyfroeling.const import MenuStructType
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,27 +65,21 @@ async def async_setup_entry(
     entities: list[FroelingEntity] = []
 
     # --- Dynamic value sensors from discovered specs ---
+    # ALL sensors discovered via cmdGetValueListFirst/Next are readable with
+    # cmdGetValue (0x30) regardless of menu_type.  This matches linux-p4d
+    # which stores every ValueSpec as type "VA".
     for spec in coordinator.data.specs:
-        menu_type = spec.menu_type
-
-        if menu_type in (MenuStructType.MESSWERT, MenuStructType.MESSWERT1):
-            # Standard measured sensor (temperature, pressure, %, …).
-            entities.append(
-                FroelingValueSensor(coordinator, spec.address, spec.title, spec.unit, sensor_type="VA")
+        entities.append(
+            FroelingValueSensor(
+                coordinator, spec.address, spec.title, spec.unit, sensor_type="VA"
             )
-
-        elif menu_type == MenuStructType.ANL_OUT:
-            # Analogue output channel – also exposed as a numeric sensor.
-            entities.append(
-                FroelingValueSensor(coordinator, spec.address, spec.title, spec.unit, sensor_type="AO")
-            )
-
-        # DIG_OUT and DIG_IN are handled by the binary_sensor platform.
+        )
 
     # --- Fixed "meta" sensors ---
     entities.append(FroelingStateSensor(coordinator))
     entities.append(FroelingModeSensor(coordinator))
     entities.append(FroelingActiveErrorCountSensor(coordinator))
+    entities.append(FroelingErrorCountTotalSensor(coordinator))
     entities.append(FroelingLastErrorSensor(coordinator))
 
     _LOGGER.debug(
@@ -218,63 +211,74 @@ class FroelingModeSensor(FroelingEntity, SensorEntity):
 
 
 class FroelingActiveErrorCountSensor(FroelingEntity, SensorEntity):
-    """Numeric sensor counting the number of currently active (ARRIVED) errors.
+    """Numeric sensor counting errors that are still active (not acknowledged, not gone).
 
-    An error is considered "active" when its :class:`~pyfroeling.ErrorState`
-    bitmask includes the ARRIVED flag.  Errors that have been acknowledged or
-    are already GONE are not counted.
+    Error states from the heater (discrete values, NOT bitmasks):
+      - ARRIVED (1): error is active and has NOT been acknowledged
+      - ACKNOWLEDGED (2): operator has acknowledged the error
+      - GONE (4): error condition has cleared
 
-    Typical use: alert automations trigger when this count goes above zero.
+    Only errors with state == ARRIVED (exactly 1) are counted as "active".
+    Acknowledged and gone errors are not counted.
     """
 
     def __init__(self, coordinator: FroelingCoordinator) -> None:
-        """Initialise the active-error-count sensor with virtual address 0x0001."""
         super().__init__(coordinator, "ERR", 0x0001, "Active Errors")
-        # Icon that signals "something needs attention".
         self._attr_icon = "mdi:alert-circle"
-        # Errors are countable, instantaneous measurements.
         self._attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def native_value(self) -> int | None:
-        """Count and return errors that currently have the ARRIVED flag set."""
+        """Count errors with state == ARRIVED (exactly 1)."""
         if self.coordinator.data is None:
             return None
-
+        # Discrete state check: only count errors that have NOT been
+        # acknowledged or cleared by the operator.
         return sum(
-            1
-            for err in self.coordinator.data.errors
-            # Use bitmask test so combined states (e.g. ARRIVED | ACKNOWLEDGED = 3)
-            # are also counted as active.  ErrorState.ARRIVED == 1.
-            if err.state & ErrorState.ARRIVED
+            1 for err in self.coordinator.data.errors
+            if err.state == ErrorState.ARRIVED
         )
 
 
-class FroelingLastErrorSensor(FroelingEntity, SensorEntity):
-    """Text sensor showing the message text of the most recent error entry.
-
-    Returns the text of the first entry in the error log (index 0), which is
-    the most recent error the controller has recorded.  Returns None when no
-    errors are present.
-
-    Useful on dashboards: the heater state binary sensor (PROBLEM) can trigger
-    an alert while this sensor shows the reason.
-    """
+class FroelingErrorCountTotalSensor(FroelingEntity, SensorEntity):
+    """Total number of entries in the heater's error log (all states)."""
 
     def __init__(self, coordinator: FroelingCoordinator) -> None:
-        """Initialise the last-error sensor with virtual address 0x0002."""
+        super().__init__(coordinator, "ERR", 0x0003, "Error Log Entries")
+        self._attr_icon = "mdi:format-list-bulleted"
+        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_entity_registry_enabled_default = False  # disabled by default
+
+    @property
+    def native_value(self) -> int | None:
+        if self.coordinator.data is None:
+            return None
+        return len(self.coordinator.data.errors)
+
+
+class FroelingLastErrorSensor(FroelingEntity, SensorEntity):
+    """Text sensor showing the most recent error's description and state.
+
+    Format: "Störung STB (quittiert)" or "Fehler Saugzug (aktiv)"
+    """
+
+    # Map error states to German display text
+    _STATE_LABELS = {
+        ErrorState.ARRIVED: "aktiv",
+        ErrorState.ACKNOWLEDGED: "quittiert",
+        ErrorState.GONE: "gegangen",
+    }
+
+    def __init__(self, coordinator: FroelingCoordinator) -> None:
         super().__init__(coordinator, "ERR", 0x0002, "Last Error")
         self._attr_icon = "mdi:alert"
 
     @property
     def native_value(self) -> str | None:
-        """Return the text of the first (most recent) error, or None."""
-        if self.coordinator.data is None:
+        """Return the most recent error text with its state label."""
+        if self.coordinator.data is None or not self.coordinator.data.errors:
             return None
 
-        errors = self.coordinator.data.errors
-        if not errors:
-            # No errors in the log – return None so HA shows "Unknown".
-            return None
-
-        return errors[0].text
+        err = self.coordinator.data.errors[0]
+        state_label = self._STATE_LABELS.get(err.state, f"state={err.state}")
+        return f"{err.text} ({state_label})"
