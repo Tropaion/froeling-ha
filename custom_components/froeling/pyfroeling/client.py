@@ -31,6 +31,8 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
+_LOGGER = logging.getLogger(__name__)
+
 from .commands import (
     build_check_request,
     build_get_anl_out_request,
@@ -590,11 +592,16 @@ class FroelingClient:
                     f"Malformed response for {command.name}: {exc}"
                 ) from exc
 
-            # Verify the controller echoed back the same command code.
+            # Log the response command for debugging but do NOT enforce a
+            # strict match.  The Lambdatronic controller does not always echo
+            # the same command code -- e.g. it responds to GET_VALUE_LIST_NEXT
+            # (0x32) with 0x31 (GET_VALUE_LIST_FIRST) in the response header.
+            # linux-p4d (the reference implementation) never checks this field.
             if resp_cmd != command.value:
-                raise FroelingProtocolError(
-                    f"Command mismatch: sent 0x{command.value:02X} "
-                    f"({command.name}), received 0x{resp_cmd:02X}."
+                _LOGGER.debug(
+                    "Response command 0x%02X differs from request 0x%02X (%s) "
+                    "– this is normal for some Lambdatronic commands",
+                    resp_cmd, command.value, command.name,
                 )
 
             # Validate that there is at least one byte (the CRC).
