@@ -27,19 +27,24 @@ DEFAULT_HOST = "192.168.88.180"
 # Default port used by the Elfin EE10 and similar serial-over-TCP adapters.
 DEFAULT_PORT = 8899
 
-# How often (in seconds) the DataUpdateCoordinator polls the heater.
-# Fröling controllers are not real-time; 60 s gives fresh data without flooding
-# the COM1 serial link (which is shared with the LCD display).
-SCAN_INTERVAL = 60
+# Default polling interval in seconds.  The heater's COM1 serial link is
+# shared with the LCD display, so we don't poll too aggressively.
+DEFAULT_SCAN_INTERVAL = 60
+
+# Allowed range for the user-configurable polling interval.
+MIN_SCAN_INTERVAL = 10    # Faster than 10s risks overloading the serial link
+MAX_SCAN_INTERVAL = 600   # 10 minutes is the longest that makes sense
 
 # ---------------------------------------------------------------------------
 # Config entry keys
 # ---------------------------------------------------------------------------
 
-# Keys stored in config_entry.data.  Using explicit constants instead of bare
-# strings prevents typos from causing subtle bugs at runtime.
+# Keys stored in config_entry.data (connection settings).
 CONF_HOST = "host"
 CONF_PORT = "port"
+
+# Keys stored in config_entry.options (user-adjustable settings).
+CONF_SCAN_INTERVAL = "scan_interval"
 
 # ---------------------------------------------------------------------------
 # Sensor unit → HA device-class mapping

@@ -15,10 +15,24 @@ from typing import Any
 
 import voluptuous as vol
 
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.core import HomeAssistant
+from homeassistant.config_entries import (
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlow,
+)
+from homeassistant.core import HomeAssistant, callback
 
-from .const import CONF_HOST, CONF_PORT, DEFAULT_HOST, DEFAULT_PORT, DOMAIN
+from .const import (
+    CONF_HOST,
+    CONF_PORT,
+    CONF_SCAN_INTERVAL,
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+    MAX_SCAN_INTERVAL,
+    MIN_SCAN_INTERVAL,
+)
 from .pyfroeling import FroelingClient, FroelingConnectionError
 
 _LOGGER = logging.getLogger(__name__)
@@ -77,16 +91,26 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
 
     Flow steps
     ----------
-    user  –  Show form → validate connection → create entry (or show errors)
+    user        –  Show form → validate connection → create entry
+    reconfigure –  Update host/port from Settings page
+    options     –  Configure polling interval via FroelingOptionsFlow
 
     A unique_id of ``"host:port"`` is used so that the same physical device
     cannot be added twice.  If the combination is already configured, the flow
     is aborted with the "already_configured" reason.
     """
 
-    # HA uses this version number to decide whether a migration is needed when
-    # the data schema changes in a future release.
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Return the options flow handler for this integration.
+
+        This enables the "Configure" button on the integration page in
+        Settings, allowing users to adjust the polling interval.
+        """
+        return FroelingOptionsFlow(config_entry)
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -216,3 +240,50 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=schema,
             errors=errors,
         )
+
+
+# ---------------------------------------------------------------------------
+# Options flow (Settings > Integrations > Fröling > Configure)
+# ---------------------------------------------------------------------------
+
+class FroelingOptionsFlow(OptionsFlow):
+    """Handle the options flow for adjusting the polling interval.
+
+    Accessible via Settings > Integrations > Fröling Heater > Configure.
+    Changes take effect after the next polling cycle (no restart needed).
+    """
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
+        self._config_entry = config_entry
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show the options form with the current polling interval.
+
+        The polling interval determines how often the heater is queried.
+        Lower values = fresher data but more serial traffic.
+        Minimum: 10s, Maximum: 600s (10 min), Default: 60s.
+        """
+        if user_input is not None:
+            # Save the new options and let HA reload the integration
+            return self.async_create_entry(title="", data=user_input)
+
+        # Pre-fill with current value
+        current_interval = self._config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+
+        schema = vol.Schema(
+            {
+                vol.Required(
+                    CONF_SCAN_INTERVAL,
+                    default=current_interval,
+                ): vol.All(
+                    vol.Coerce(int),
+                    vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
+                ),
+            }
+        )
+
+        return self.async_show_form(step_id="init", data_schema=schema)

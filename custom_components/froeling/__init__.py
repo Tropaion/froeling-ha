@@ -123,11 +123,26 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
+    # Listen for options changes (e.g. polling interval) so they take
+    # effect without a full restart.
+    entry.async_on_unload(entry.add_update_listener(_async_options_updated))
+
     _LOGGER.info(
         "Fröling integration set up for %s:%d – firmware %s",
         host, port, coordinator.data.status.version,
     )
     return True
+
+
+async def _async_options_updated(
+    hass: "HomeAssistant", entry: "ConfigEntry"
+) -> None:
+    """Handle options update (e.g. polling interval changed).
+
+    Reloads the integration so the new interval takes effect immediately.
+    """
+    _LOGGER.info("Fröling options changed, reloading integration")
+    await hass.config_entries.async_reload(entry.entry_id)
 
 
 # ---------------------------------------------------------------------------

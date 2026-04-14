@@ -26,5 +26,16 @@
       "already_configured": "This heater is already configured.",
       "reconfigure_successful": "Connection updated successfully."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fröling Heater Options",
+        "description": "Only enabled sensors are polled. Disable sensors you don't need to reduce serial traffic.",
+        "data": {
+          "scan_interval": "Polling interval (seconds)"
+        }
+      }
+    }
   }
 }

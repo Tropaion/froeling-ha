@@ -16,9 +16,10 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import DOMAIN, SCAN_INTERVAL
+from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .pyfroeling import (
     ErrorEntry,
     FroelingClient,
@@ -109,13 +110,17 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
             :class:`FroelingClient`.  The coordinator takes ownership of the
             connection lifecycle after this point.
         """
+        # Read the polling interval from options (user-configurable), falling
+        # back to the default if not set.
+        scan_interval = config_entry.options.get(
+            CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
+        )
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            # Poll every SCAN_INTERVAL seconds.  always_update=False means HA
-            # will skip entity updates if the data hash has not changed.
-            update_interval=timedelta(seconds=SCAN_INTERVAL),
+            update_interval=timedelta(seconds=scan_interval),
             always_update=False,
         )
 
@@ -202,8 +207,24 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
                 status.state_text, status.mode_text, status.is_error,
             )
 
-            # --- Fetch all sensor values using the cached specs ---
-            values = await self.client.get_all_values(self._specs)
+            # --- Fetch only ENABLED sensor values ---
+            # Build the set of addresses that have enabled entities in HA.
+            # This avoids polling sensors the user has disabled, reducing
+            # serial traffic from ~120 requests to only the ones in use.
+            enabled_addresses = self._get_enabled_sensor_addresses()
+
+            if enabled_addresses is not None:
+                # Filter specs to only those with enabled entities
+                active_specs = [s for s in self._specs if s.address in enabled_addresses]
+                _LOGGER.debug(
+                    "FroelingCoordinator: polling %d of %d sensors (rest disabled)",
+                    len(active_specs), len(self._specs),
+                )
+            else:
+                # Fallback: if we can't determine enabled entities, poll all
+                active_specs = self._specs
+
+            values = await self.client.get_all_values(active_specs)
             _LOGGER.debug(
                 "FroelingCoordinator: fetched %d sensor values", len(values)
             )
@@ -229,3 +250,44 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
             errors=errors,
             specs=self._specs,
         )
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _get_enabled_sensor_addresses(self) -> set[int] | None:
+        """Return the set of sensor addresses that have enabled HA entities.
+
+        Queries the entity registry for all entities belonging to this config
+        entry and extracts the sensor address from the unique_id format:
+          {entry_id}_VA_0x{address:04x}
+
+        Only entities that are NOT disabled are included.  This allows the
+        coordinator to skip polling addresses the user has turned off,
+        significantly reducing serial traffic.
+
+        Returns None if the registry is not available (first startup).
+        """
+        try:
+            registry = er.async_get(self.hass)
+        except Exception:
+            return None
+
+        entry_id = self.config_entry.entry_id
+        enabled_addresses: set[int] = set()
+
+        for entity in er.async_entries_for_config_entry(registry, entry_id):
+            # Skip disabled entities
+            if entity.disabled:
+                continue
+
+            # Extract address from unique_id: "{entry_id}_{type}_0x{addr}"
+            uid = entity.unique_id or ""
+            if "_0x" in uid:
+                try:
+                    addr_hex = uid.rsplit("_0x", 1)[1]
+                    enabled_addresses.add(int(addr_hex, 16))
+                except (ValueError, IndexError):
+                    pass
+
+        return enabled_addresses if enabled_addresses else None
