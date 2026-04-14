@@ -42,6 +42,10 @@ MAX_SCAN_INTERVAL = 600   # 10 minutes is the longest that makes sense
 # Keys stored in config_entry.data (connection settings).
 CONF_HOST = "host"
 CONF_PORT = "port"
+CONF_DEVICE_NAME = "device_name"
+
+# Default device name shown in HA device registry
+DEFAULT_DEVICE_NAME = "Fröling Heater"
 
 # Keys stored in config_entry.data (selected sensors from setup flow).
 CONF_SELECTED_SENSORS = "selected_sensors"

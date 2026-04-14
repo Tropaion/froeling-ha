@@ -16,7 +16,7 @@ from __future__ import annotations
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN
+from .const import CONF_DEVICE_NAME, DEFAULT_DEVICE_NAME, DOMAIN
 from .coordinator import FroelingCoordinator
 
 
@@ -103,8 +103,10 @@ class FroelingEntity(CoordinatorEntity[FroelingCoordinator]):
         return DeviceInfo(
             # Unique device identifier keyed to this config entry.
             identifiers={(DOMAIN, entry_id)},
-            # Friendly device name shown in the Devices UI.
-            name="Fröling Heater",
+            # Friendly device name from user input during setup.
+            name=self.coordinator.config_entry.data.get(
+                CONF_DEVICE_NAME, DEFAULT_DEVICE_NAME
+            ),
             # The manufacturer name as it appears on the physical device.
             manufacturer="Fröling",
             # Controller board name (Lambdatronic P 3200 is the pellet-specific

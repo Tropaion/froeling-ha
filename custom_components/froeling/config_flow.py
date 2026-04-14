@@ -37,10 +37,12 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_DEVICE_NAME,
     CONF_HOST,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     CONF_SELECTED_SENSORS,
+    DEFAULT_DEVICE_NAME,
     DEFAULT_HOST,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
@@ -55,6 +57,7 @@ _LOGGER = logging.getLogger(__name__)
 # Schema for the connection step
 _STEP_USER_SCHEMA = vol.Schema(
     {
+        vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
         vol.Required(CONF_HOST, default=DEFAULT_HOST): str,
         vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
     }
@@ -158,6 +161,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize flow state for multi-step data passing."""
+        self._device_name: str = DEFAULT_DEVICE_NAME
         self._host: str = ""
         self._port: int = 0
         self._discovered: list[DiscoveredSensor] = []
@@ -182,6 +186,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            self._device_name = user_input[CONF_DEVICE_NAME]
             self._host = user_input[CONF_HOST]
             self._port = user_input[CONF_PORT]
 
@@ -238,10 +243,11 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
-            # Create the config entry with connection + selected sensors
+            # Create the config entry with name, connection, and selected sensors
             return self.async_create_entry(
-                title=f"Fröling ({self._host})",
+                title=self._device_name,
                 data={
+                    CONF_DEVICE_NAME: self._device_name,
                     CONF_HOST: self._host,
                     CONF_PORT: self._port,
                     CONF_SELECTED_SENSORS: selected,

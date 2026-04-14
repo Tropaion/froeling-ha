@@ -5,6 +5,7 @@
         "title": "Fröling Heater Connection",
         "description": "Enter the IP address and port of your TCP-to-serial converter (e.g., Elfin EE10) connected to the heater's COM1 port.",
         "data": {
+          "device_name": "Device Name",
           "host": "Host",
           "port": "Port"
         }
