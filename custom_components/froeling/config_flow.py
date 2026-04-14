@@ -114,20 +114,36 @@ async def _validate_and_discover(
         await client.disconnect()
 
 
+def _is_likely_absent(sensor: DiscoveredSensor) -> bool:
+    """Check if a sensor is likely not physically present on this heater.
+
+    Temperature sensors (unit °C) reading exactly 0.0 almost always indicate
+    that no physical sensor is connected to that address. The Lambdatronic
+    reports all possible addresses, even for optional sensors that aren't
+    installed on a particular model.
+    """
+    if not sensor.readable:
+        return True
+    if sensor.value is not None and sensor.value == 0.0 and sensor.spec.unit == "°C":
+        return True
+    return False
+
+
 def _sensors_to_select_options(
-    sensors: list[DiscoveredSensor], include_unreadable: bool = False
+    sensors: list[DiscoveredSensor], include_absent: bool = False
 ) -> list[SelectOptionDict]:
     """Convert discovered sensors to HA SelectOptionDict for multi-select UI.
 
     Shows the sensor title, unit, and current value.
     Example: "Kesseltemperatur = 65.3 °C" with value "0x0000"
 
-    Sensors that couldn't be read are excluded by default (likely not
-    physically present on this heater model).
+    Filters out:
+    - Sensors that couldn't be read (connection error)
+    - Temperature sensors reading exactly 0.0°C (no physical sensor connected)
     """
     options: list[SelectOptionDict] = []
     for sensor in sensors:
-        if not sensor.readable and not include_unreadable:
+        if _is_likely_absent(sensor) and not include_absent:
             continue
 
         # Build a descriptive label showing the current value

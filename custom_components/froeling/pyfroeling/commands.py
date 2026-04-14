@@ -79,7 +79,7 @@ def _decode_string(data: bytes, encoding: str = "latin-1") -> str:
     str
         Decoded, stripped string.
     """
-    return data.decode(encoding, errors="replace").rstrip("\x00").strip()
+    return data.decode(encoding, errors="replace").strip("\x00").strip()
 
 
 # ---------------------------------------------------------------------------
