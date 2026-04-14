@@ -401,6 +401,14 @@ def parse_value_spec_response(payload: bytes) -> dict[str, Any]:
         # End-of-list sentinel.
         return {"more": False}
 
+    # The heater occasionally sends a response with more=1 but a payload too
+    # short to contain a valid entry.  linux-p4d handles this at p4io.c:1089:
+    #     if (size < 11) { ... return wrnEmpty; }
+    # Minimum valid entry: more(1) + factor(2) + type(2) + unit(2) + addr(2) = 9
+    # (plus at least a title byte and terminator, but we're lenient here).
+    if len(payload) < 10:
+        return {"more": True, "empty": True}
+
     # --- factor (2 bytes, unsigned big-endian) ---
     (factor_raw,) = struct.unpack(">H", payload[1:3])
     # A factor of 0 means no scaling (treat as 1).

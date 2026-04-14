@@ -159,3 +159,60 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=_STEP_USER_SCHEMA,
             errors=errors,
         )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Handle reconfiguration of host/port from the Settings page.
+
+        Allows the user to update the TCP-to-serial bridge address without
+        removing and re-adding the integration.  Accessible via:
+          Settings > Integrations > Fröling Heater > Reconfigure
+
+        The same connection validation as the initial setup is performed.
+        """
+        errors: dict[str, str] = {}
+
+        # Get the existing config entry being reconfigured
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            host: str = user_input[CONF_HOST]
+            port: int = user_input[CONF_PORT]
+
+            try:
+                await _validate_connection(self.hass, host, port)
+            except FroelingConnectionError:
+                _LOGGER.debug(
+                    "Reconfigure: cannot connect to Fröling at %s:%d", host, port
+                )
+                errors["base"] = "cannot_connect"
+            except Exception:  # noqa: BLE001
+                _LOGGER.exception(
+                    "Reconfigure: unexpected error connecting to %s:%d", host, port
+                )
+                errors["base"] = "unknown"
+            else:
+                # Update the unique_id and config entry data
+                return self.async_update_reload_and_abort(
+                    entry,
+                    unique_id=f"{host}:{port}",
+                    title=f"Fröling ({host})",
+                    data={CONF_HOST: host, CONF_PORT: port},
+                )
+
+        # Pre-fill the form with the current values
+        current_host = entry.data.get(CONF_HOST, DEFAULT_HOST)
+        current_port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+        schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=current_host): str,
+                vol.Required(CONF_PORT, default=current_port): int,
+            }
+        )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            errors=errors,
+        )

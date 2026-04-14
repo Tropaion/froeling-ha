@@ -8,6 +8,14 @@
           "host": "Host",
           "port": "Port"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Fröling Heater",
+        "description": "Update the connection settings for your TCP-to-serial converter.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
       }
     },
     "error": {
@@ -15,7 +23,8 @@
       "unknown": "An unexpected error occurred."
     },
     "abort": {
-      "already_configured": "This heater is already configured."
+      "already_configured": "This heater is already configured.",
+      "reconfigure_successful": "Connection updated successfully."
     }
   }
 }

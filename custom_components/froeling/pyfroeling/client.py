@@ -405,6 +405,13 @@ class FroelingClient:
                 )
                 break
 
+            # The heater may send a short/empty entry with more=True.
+            # Skip it and continue to the next page (p4io.c:1089 wrnEmpty).
+            if data.get("empty", False):
+                _log.debug("discover_sensors page %d: skipping short/empty entry", page_num)
+                first = False
+                continue
+
             specs.append(ValueSpec(
                 address   = data["address"],
                 factor    = data["factor"],
