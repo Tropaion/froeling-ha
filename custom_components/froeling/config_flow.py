@@ -1,22 +1,21 @@
 """Config flow for the Fröling Heater integration.
 
 Multi-step setup:
-  1. User enters host + port of the TCP-to-serial converter
-  2. Integration connects, discovers all available sensors
-  3. User selects which sensors to enable
-  4. Config entry is created with selected sensors
+  1. User chooses connection type (Network TCP or USB Serial)
+  2. User enters connection details + device name
+  3. Integration connects, discovers sensors, reads current values
+  4. User selects which sensors to enable
+  5. Config entry is created
 
 Also provides:
-  - Reconfigure flow to change host/port
+  - Reconfigure flow to change connection settings
   - Options flow to adjust polling interval and sensor selection
-
-HA config-flow docs:
-  https://developers.home-assistant.io/docs/config_entries_config_flow_handler
 """
 
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -37,13 +36,16 @@ from homeassistant.helpers.selector import (
 )
 
 from .const import (
+    CONF_CONNECTION_TYPE,
     CONF_DEVICE_NAME,
     CONF_HOST,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     CONF_SELECTED_SENSORS,
+    CONF_SERIAL_DEVICE,
+    CONN_TYPE_NETWORK,
+    CONN_TYPE_SERIAL,
     DEFAULT_DEVICE_NAME,
-    DEFAULT_HOST,
     DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -54,73 +56,41 @@ from .pyfroeling import FroelingClient, FroelingConnectionError, ValueSpec
 
 _LOGGER = logging.getLogger(__name__)
 
-# Schema for the connection step
-_STEP_USER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
-        vol.Required(CONF_HOST, default=DEFAULT_HOST): str,
-        vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
-    }
-)
 
+# ---------------------------------------------------------------------------
+# Sensor discovery helper
+# ---------------------------------------------------------------------------
 
 @dataclass
 class DiscoveredSensor:
     """A sensor discovered from the heater with its current value."""
     spec: ValueSpec
-    value: float | None  # Current reading, or None if read failed
-    readable: bool       # True if the sensor responded with a valid value
+    value: float | None
+    readable: bool
 
 
-async def _validate_and_discover(
-    host: str, port: int
-) -> list[DiscoveredSensor]:
-    """Connect to the heater, discover sensors, and read their current values.
+async def _discover_sensors(client: FroelingClient) -> list[DiscoveredSensor]:
+    """Discover all sensors and read their current values.
 
-    Returns a list of DiscoveredSensor objects with current readings.
+    Returns a list of DiscoveredSensor with current readings.
     Sensors that fail to read are marked as not readable.
-
-    Raises FroelingConnectionError if the initial connection fails.
     """
-    client = FroelingClient(host, port)
-    try:
-        await client.connect()
-        ok = await client.check_connection()
-        if not ok:
-            raise FroelingConnectionError(
-                f"Heater at {host}:{port} did not respond to CHECK command"
-            )
-
-        # Step 1: Discover all available sensor addresses
-        specs = await client.discover_sensors()
-
-        # Step 2: Read current values for each sensor to check which are real
-        discovered: list[DiscoveredSensor] = []
-        for spec in specs:
-            try:
-                sv = await client.get_value(spec.address, spec)
-                discovered.append(DiscoveredSensor(
-                    spec=spec, value=sv.value, readable=True
-                ))
-            except Exception:
-                # Sensor address exists in the list but couldn't be read --
-                # likely not physically connected on this heater model
-                discovered.append(DiscoveredSensor(
-                    spec=spec, value=None, readable=False
-                ))
-
-        return discovered
-    finally:
-        await client.disconnect()
+    specs = await client.discover_sensors()
+    discovered: list[DiscoveredSensor] = []
+    for spec in specs:
+        try:
+            sv = await client.get_value(spec.address, spec)
+            discovered.append(DiscoveredSensor(spec=spec, value=sv.value, readable=True))
+        except Exception:
+            discovered.append(DiscoveredSensor(spec=spec, value=None, readable=False))
+    return discovered
 
 
 def _is_likely_absent(sensor: DiscoveredSensor) -> bool:
-    """Check if a sensor is likely not physically present on this heater.
+    """Check if a sensor is likely not physically present.
 
-    Temperature sensors (unit °C) reading exactly 0.0 almost always indicate
-    that no physical sensor is connected to that address. The Lambdatronic
-    reports all possible addresses, even for optional sensors that aren't
-    installed on a particular model.
+    Temperature sensors reading exactly 0.0°C almost always indicate
+    no physical sensor is connected to that address.
     """
     if not sensor.readable:
         return True
@@ -132,245 +102,260 @@ def _is_likely_absent(sensor: DiscoveredSensor) -> bool:
 def _sensors_to_select_options(
     sensors: list[DiscoveredSensor], include_absent: bool = False
 ) -> list[SelectOptionDict]:
-    """Convert discovered sensors to HA SelectOptionDict for multi-select UI.
+    """Convert discovered sensors to HA select options with live values.
 
-    Shows the sensor title, unit, and current value.
-    Example: "Kesseltemperatur = 65.3 °C"
-
-    Filters out:
-    - Sensors that couldn't be read (connection error)
-    - Temperature sensors reading exactly 0.0°C (no physical sensor connected)
-
-    When the same title appears multiple times (e.g. "Außentemperatur" for
-    different heating circuits), the address is appended to distinguish them.
-    No deduplication -- all sensors are always shown.
+    Filters absent sensors. Appends address suffix for duplicate titles.
     """
-    from collections import Counter
-
-    # Filter out absent sensors
     present = [s for s in sensors if not _is_likely_absent(s) or include_absent]
-
-    # Count titles to detect duplicates
     title_counts = Counter(s.spec.title for s in present)
 
     options: list[SelectOptionDict] = []
     for sensor in present:
         title = sensor.spec.title
-
-        # Build label with current value
         if sensor.readable and sensor.value is not None:
-            if sensor.spec.unit:
-                label = f"{title} = {sensor.value:.1f} {sensor.spec.unit}"
-            else:
-                label = f"{title} = {sensor.value:.1f}"
+            label = f"{title} = {sensor.value:.1f} {sensor.spec.unit}".rstrip()
         else:
             label = f"{title} (nicht verfügbar)"
 
-        # Append address when the same title appears more than once
         if title_counts[title] > 1:
             label = f"{label}  [0x{sensor.spec.address:04X}]"
 
         options.append(
-            SelectOptionDict(
-                value=f"0x{sensor.spec.address:04X}",
-                label=label,
-            )
+            SelectOptionDict(value=f"0x{sensor.spec.address:04X}", label=label)
         )
     return options
 
 
-class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Handle the multi-step config flow for adding a Fröling heater.
+def _create_client(data: dict[str, Any]) -> FroelingClient:
+    """Create a FroelingClient from config entry data."""
+    conn_type = data.get(CONF_CONNECTION_TYPE, CONN_TYPE_NETWORK)
+    if conn_type == CONN_TYPE_SERIAL:
+        return FroelingClient(serial_device=data[CONF_SERIAL_DEVICE])
+    else:
+        return FroelingClient(host=data[CONF_HOST], port=data[CONF_PORT])
 
-    Flow steps:
-      user     -> enter host/port, validate connection, discover sensors
-      sensors  -> select which sensors to enable
-      create   -> create config entry with selected sensors
-    """
+
+# ---------------------------------------------------------------------------
+# Config flow
+# ---------------------------------------------------------------------------
+
+class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
+    """Multi-step config flow: connection type -> details -> sensor selection."""
 
     VERSION = 1
 
     def __init__(self) -> None:
-        """Initialize flow state for multi-step data passing."""
         self._device_name: str = DEFAULT_DEVICE_NAME
+        self._conn_type: str = CONN_TYPE_NETWORK
         self._host: str = ""
-        self._port: int = 0
+        self._port: int = DEFAULT_PORT
+        self._serial_device: str = ""
         self._discovered: list[DiscoveredSensor] = []
 
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> FroelingOptionsFlow:
-        """Return the options flow handler (Configure button)."""
         return FroelingOptionsFlow(config_entry)
 
     # ------------------------------------------------------------------
-    # Step 1: Connection settings
+    # Step 1: Connection type menu
     # ------------------------------------------------------------------
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 1: Collect host and port, validate connection, discover sensors.
+        """Show menu to choose between network and USB serial connection."""
+        return self.async_show_menu(
+            step_id="user",
+            menu_options=["network", "serial"],
+        )
 
-        On success, transitions to step 2 (sensor selection).
-        """
+    # ------------------------------------------------------------------
+    # Step 1a: Network (TCP) connection details
+    # ------------------------------------------------------------------
+
+    async def async_step_network(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect host, port, and device name for a TCP connection."""
         errors: dict[str, str] = {}
 
         if user_input is not None:
+            self._conn_type = CONN_TYPE_NETWORK
             self._device_name = user_input[CONF_DEVICE_NAME]
             self._host = user_input[CONF_HOST]
             self._port = user_input[CONF_PORT]
 
+            client = FroelingClient(host=self._host, port=self._port)
             try:
-                self._discovered = await _validate_and_discover(
-                    self._host, self._port
-                )
-                readable = sum(1 for s in self._discovered if s.readable)
-                _LOGGER.info(
-                    "Config flow: discovered %d sensors (%d readable) from %s:%d",
-                    len(self._discovered), readable, self._host, self._port,
-                )
+                await client.connect()
+                self._discovered = await _discover_sensors(client)
+                await client.disconnect()
             except FroelingConnectionError:
-                _LOGGER.debug(
-                    "Config flow: cannot connect to %s:%d", self._host, self._port
-                )
                 errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001
-                _LOGGER.exception(
-                    "Config flow: unexpected error with %s:%d", self._host, self._port
-                )
+            except Exception:
+                _LOGGER.exception("Unexpected error during network setup")
                 errors["base"] = "unknown"
             else:
                 if not self._discovered:
                     errors["base"] = "no_sensors"
                 else:
-                    # Connection OK, sensors found -> go to sensor selection
                     return await self.async_step_sensors()
 
+        schema = vol.Schema({
+            vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
+            vol.Required(CONF_HOST): str,
+            vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
+        })
+
         return self.async_show_form(
-            step_id="user",
-            data_schema=_STEP_USER_SCHEMA,
-            errors=errors,
+            step_id="network", data_schema=schema, errors=errors,
         )
 
     # ------------------------------------------------------------------
-    # Step 2: Sensor selection
+    # Step 1b: USB Serial connection details
+    # ------------------------------------------------------------------
+
+    async def async_step_serial(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Collect serial device path and device name for a USB connection."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            self._conn_type = CONN_TYPE_SERIAL
+            self._device_name = user_input[CONF_DEVICE_NAME]
+            self._serial_device = user_input[CONF_SERIAL_DEVICE]
+
+            client = FroelingClient(serial_device=self._serial_device)
+            try:
+                await client.connect()
+                self._discovered = await _discover_sensors(client)
+                await client.disconnect()
+            except FroelingConnectionError:
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected error during serial setup")
+                errors["base"] = "unknown"
+            else:
+                if not self._discovered:
+                    errors["base"] = "no_sensors"
+                else:
+                    return await self.async_step_sensors()
+
+        schema = vol.Schema({
+            vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
+            vol.Required(CONF_SERIAL_DEVICE): str,
+        })
+
+        return self.async_show_form(
+            step_id="serial", data_schema=schema, errors=errors,
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2: Sensor selection (shared by both connection types)
     # ------------------------------------------------------------------
 
     async def async_step_sensors(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Step 2: Let the user select which sensors to enable.
-
-        Shows a multi-select list of all discovered sensors. All sensors
-        are pre-selected by default. The user can deselect sensors they
-        don't need to reduce serial traffic.
-        """
+        """Let the user select which sensors to enable."""
         if user_input is not None:
             selected = user_input.get(CONF_SELECTED_SENSORS, [])
 
-            # Set unique_id and check for duplicates
-            unique_id = f"{self._host}:{self._port}"
+            # Build unique_id from connection info
+            if self._conn_type == CONN_TYPE_SERIAL:
+                unique_id = f"serial:{self._serial_device}"
+            else:
+                unique_id = f"{self._host}:{self._port}"
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
-            # Create the config entry with name, connection, and selected sensors
-            return self.async_create_entry(
-                title=self._device_name,
-                data={
-                    CONF_DEVICE_NAME: self._device_name,
-                    CONF_HOST: self._host,
-                    CONF_PORT: self._port,
-                    CONF_SELECTED_SENSORS: selected,
-                },
-            )
+            # Build config entry data
+            data: dict[str, Any] = {
+                CONF_DEVICE_NAME: self._device_name,
+                CONF_CONNECTION_TYPE: self._conn_type,
+                CONF_SELECTED_SENSORS: selected,
+            }
+            if self._conn_type == CONN_TYPE_SERIAL:
+                data[CONF_SERIAL_DEVICE] = self._serial_device
+            else:
+                data[CONF_HOST] = self._host
+                data[CONF_PORT] = self._port
 
-        # Build the multi-select options from discovered sensors.
-        # Only show readable sensors (those that responded with a value).
-        # Unreadable sensors are likely not physically present on this model.
+            return self.async_create_entry(title=self._device_name, data=data)
+
         options = _sensors_to_select_options(self._discovered)
-
-        # Pre-select all readable sensors by default
         all_values = [opt["value"] for opt in options]
 
-        schema = vol.Schema(
-            {
-                vol.Required(
-                    CONF_SELECTED_SENSORS,
-                    default=all_values,
-                ): SelectSelector(
-                    SelectSelectorConfig(
-                        options=options,
-                        multiple=True,
-                        mode=SelectSelectorMode.LIST,
-                    )
-                ),
-            }
-        )
+        schema = vol.Schema({
+            vol.Required(CONF_SELECTED_SENSORS, default=all_values): SelectSelector(
+                SelectSelectorConfig(
+                    options=options, multiple=True, mode=SelectSelectorMode.LIST,
+                )
+            ),
+        })
 
-        return self.async_show_form(
-            step_id="sensors",
-            data_schema=schema,
-        )
+        return self.async_show_form(step_id="sensors", data_schema=schema)
 
     # ------------------------------------------------------------------
-    # Reconfigure (change host/port)
+    # Reconfigure
     # ------------------------------------------------------------------
 
     async def async_step_reconfigure(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Reconfigure host/port from the Settings page."""
+        """Update connection settings from the Settings page."""
         errors: dict[str, str] = {}
         entry = self._get_reconfigure_entry()
+        conn_type = entry.data.get(CONF_CONNECTION_TYPE, CONN_TYPE_NETWORK)
 
         if user_input is not None:
-            host: str = user_input[CONF_HOST]
-            port: int = user_input[CONF_PORT]
-
+            # Test new connection
+            client = _create_client(user_input | {CONF_CONNECTION_TYPE: conn_type})
             try:
-                await _validate_and_discover(host, port)
-            except FroelingConnectionError:
+                await client.connect()
+                await client.check_connection()
+                await client.disconnect()
+            except Exception:
                 errors["base"] = "cannot_connect"
-            except Exception:  # noqa: BLE001
-                errors["base"] = "unknown"
             else:
-                # Keep existing selected sensors, update connection
                 new_data = dict(entry.data)
-                new_data[CONF_HOST] = host
-                new_data[CONF_PORT] = port
+                new_data.update(user_input)
+                uid = (
+                    f"serial:{user_input.get(CONF_SERIAL_DEVICE, '')}"
+                    if conn_type == CONN_TYPE_SERIAL
+                    else f"{user_input.get(CONF_HOST, '')}:{user_input.get(CONF_PORT, '')}"
+                )
                 return self.async_update_reload_and_abort(
-                    entry,
-                    unique_id=f"{host}:{port}",
-                    title=f"Fröling ({host})",
+                    entry, unique_id=uid,
+                    title=new_data.get(CONF_DEVICE_NAME, entry.title),
                     data=new_data,
                 )
 
-        current_host = entry.data.get(CONF_HOST, DEFAULT_HOST)
-        current_port = entry.data.get(CONF_PORT, DEFAULT_PORT)
-        schema = vol.Schema(
-            {
-                vol.Required(CONF_HOST, default=current_host): str,
-                vol.Required(CONF_PORT, default=current_port): int,
-            }
-        )
+        # Show form matching current connection type
+        if conn_type == CONN_TYPE_SERIAL:
+            schema = vol.Schema({
+                vol.Required(CONF_SERIAL_DEVICE,
+                             default=entry.data.get(CONF_SERIAL_DEVICE, "")): str,
+            })
+        else:
+            schema = vol.Schema({
+                vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST, "")): str,
+                vol.Required(CONF_PORT, default=entry.data.get(CONF_PORT, DEFAULT_PORT)): int,
+            })
 
         return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=schema,
-            errors=errors,
+            step_id="reconfigure", data_schema=schema, errors=errors,
         )
 
 
 # ---------------------------------------------------------------------------
-# Options flow (Settings > Integrations > Fröling > Configure)
+# Options flow
 # ---------------------------------------------------------------------------
 
 class FroelingOptionsFlow(OptionsFlow):
-    """Options flow for polling interval and sensor selection.
-
-    Accessible via Settings > Integrations > Fröling Heater > Configure.
-    """
+    """Options flow for polling interval and sensor re-selection."""
 
     def __init__(self, config_entry: ConfigEntry) -> None:
         self._config_entry = config_entry
@@ -378,81 +363,57 @@ class FroelingOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show options: polling interval and sensor re-selection.
-
-        Sensor re-selection requires reconnecting to the heater to
-        discover the current sensor list.
-        """
+        """Show options: polling interval and sensor re-selection."""
         if user_input is not None:
-            # If sensor selection was included, update config data too
             new_options = {
                 CONF_SCAN_INTERVAL: user_input.get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                 ),
             }
-
-            # Update selected sensors in config entry data if provided
             if CONF_SELECTED_SENSORS in user_input:
                 new_data = dict(self._config_entry.data)
                 new_data[CONF_SELECTED_SENSORS] = user_input[CONF_SELECTED_SENSORS]
                 self.hass.config_entries.async_update_entry(
                     self._config_entry, data=new_data
                 )
-
             return self.async_create_entry(title="", data=new_options)
 
-        # Current values
         current_interval = self._config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
         current_selected = self._config_entry.data.get(CONF_SELECTED_SENSORS, [])
 
-        # Try to discover sensors for the selection list
-        host = self._config_entry.data.get(CONF_HOST, "")
-        port = self._config_entry.data.get(CONF_PORT, 0)
+        # Try to discover sensors for re-selection
         sensor_options: list[SelectOptionDict] = []
-
         try:
-            discovered = await _validate_and_discover(host, port)
+            client = _create_client(self._config_entry.data)
+            await client.connect()
+            discovered = await _discover_sensors(client)
+            await client.disconnect()
             sensor_options = _sensors_to_select_options(discovered)
         except Exception:
-            _LOGGER.warning(
-                "Options flow: could not discover sensors from %s:%d, "
-                "showing only polling interval",
-                host, port,
-            )
+            _LOGGER.warning("Options flow: could not discover sensors")
 
-        # Build schema
         schema_dict: dict[vol.Marker, Any] = {
-            vol.Required(
-                CONF_SCAN_INTERVAL,
-                default=current_interval,
-            ): vol.All(
+            vol.Required(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
                 vol.Coerce(int),
                 vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
             ),
         }
 
-        # Only show sensor selection if discovery succeeded
         if sensor_options:
-            # Default to current selection, or all if none set
             default_selected = (
-                current_selected
-                if current_selected
+                current_selected if current_selected
                 else [opt["value"] for opt in sensor_options]
             )
             schema_dict[vol.Required(
-                CONF_SELECTED_SENSORS,
-                default=default_selected,
+                CONF_SELECTED_SENSORS, default=default_selected,
             )] = SelectSelector(
                 SelectSelectorConfig(
-                    options=sensor_options,
-                    multiple=True,
-                    mode=SelectSelectorMode.LIST,
+                    options=sensor_options, multiple=True, mode=SelectSelectorMode.LIST,
                 )
             )
 
         return self.async_show_form(
-            step_id="init",
-            data_schema=vol.Schema(schema_dict),
+            step_id="init", data_schema=vol.Schema(schema_dict),
         )

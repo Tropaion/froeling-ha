@@ -85,26 +85,29 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     from homeassistant.const import Platform
     from homeassistant.exceptions import ConfigEntryNotReady
 
-    from .const import CONF_HOST, CONF_PORT
+    from .const import (
+        CONF_CONNECTION_TYPE, CONF_HOST, CONF_PORT,
+        CONF_SERIAL_DEVICE, CONN_TYPE_SERIAL,
+    )
     from .coordinator import FroelingCoordinator
     from .pyfroeling import FroelingClient, FroelingConnectionError
 
-    host: str = entry.data[CONF_HOST]
-    port: int = entry.data[CONF_PORT]
-
-    _LOGGER.debug("Setting up Fröling integration for %s:%d", host, port)
-
-    # Instantiate the protocol client.  Do not connect yet so we can catch
-    # errors and raise ConfigEntryNotReady (HA retries on the next start-up).
-    client = FroelingClient(host, port)
+    conn_type = entry.data.get(CONF_CONNECTION_TYPE, "network")
+    if conn_type == CONN_TYPE_SERIAL:
+        device = entry.data.get(CONF_SERIAL_DEVICE, "")
+        _LOGGER.debug("Setting up Fröling integration via serial: %s", device)
+        client = FroelingClient(serial_device=device)
+    else:
+        host = entry.data.get(CONF_HOST, "")
+        port = entry.data.get(CONF_PORT, 0)
+        _LOGGER.debug("Setting up Fröling integration via TCP: %s:%d", host, port)
+        client = FroelingClient(host=host, port=port)
 
     try:
         await client.connect()
     except FroelingConnectionError as exc:
-        # If the heater is offline at HA startup, raise ConfigEntryNotReady so
-        # HA will retry after a back-off period instead of giving up permanently.
         raise ConfigEntryNotReady(
-            f"Cannot connect to Fröling heater at {host}:{port}: {exc}"
+            f"Cannot connect to Fröling heater: {exc}"
         ) from exc
 
     # Create the coordinator that owns the polling loop.
@@ -128,8 +131,8 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     entry.async_on_unload(entry.add_update_listener(_async_options_updated))
 
     _LOGGER.info(
-        "Fröling integration set up for %s:%d – firmware %s",
-        host, port, coordinator.data.status.version,
+        "Fröling integration set up – firmware %s",
+        coordinator.data.status.version,
     )
     return True
 

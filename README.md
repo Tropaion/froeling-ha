@@ -37,28 +37,36 @@ Any Fröling heater with a **Lambdatronic P 3200** or **S 3200** controller:
 </td>
 <td width="50%">
 
-### Connection
+### Connection (two options)
 
-Requires a **TCP-to-serial converter** connected to the heater's **COM1** port:
+Connect to the heater's **COM1** port via either method:
 
-| Converter | Status |
-|-----------|--------|
-| Elfin EE10 | Tested |
-| Waveshare RS232-to-Ethernet | Compatible |
-| Any TCP-to-RS232 bridge | Should work |
+| Method | Hardware | Examples |
+|--------|----------|----------|
+| **Network** | TCP-to-serial converter | Elfin EE10, Waveshare RS232-to-Ethernet |
+| **USB Serial** | USB-to-RS232 adapter | FTDI USB-RS232, Prolific PL2303 |
 
 </td>
   </tr>
 </table>
 
+**Option A: Network (TCP-to-serial converter)**
 ```
  ┌──────────────┐    RS232     ┌────────────────────┐    TCP/IP    ┌─────────────────┐
- │  Fröling P1  │◄────────────►│  TCP-to-serial     │◄────────────►│  Home Assistant  │
+ │  Fröling     │◄────────────►│  TCP-to-serial     │◄────────────►│  Home Assistant  │
  │  COM1 (DB9)  │  null-modem  │  converter         │   network    │  Integration     │
  └──────────────┘              └────────────────────┘              └─────────────────┘
 ```
 
-> **Note:** This integration uses the **COM1 service interface** with the proprietary binary protocol, **not** COM2/Modbus. The converter must be physically connected to the **COM1 DB9 port** on the Lambdatronic board.
+**Option B: USB Serial (direct connection)**
+```
+ ┌──────────────┐    RS232     ┌────────────────────┐     USB      ┌─────────────────┐
+ │  Fröling     │◄────────────►│  USB-to-RS232      │◄────────────►│  Home Assistant  │
+ │  COM1 (DB9)  │  null-modem  │  adapter           │              │  Integration     │
+ └──────────────┘              └────────────────────┘              └─────────────────┘
+```
+
+> **Note:** This integration uses the **COM1 service interface** with the proprietary binary protocol, **not** COM2/Modbus. The adapter must be connected to the **COM1 DB9 port** on the Lambdatronic board.
 
 ---
 
@@ -138,9 +146,9 @@ The integration guides you through a **3-step setup**:
 
 | Step | Description |
 |------|-------------|
-| **1. Connection** | Enter device name, host IP, and port of your converter |
-| **2. Sensor Selection** | Browse discovered sensors with live values, select which to monitor |
-| **3. Done** | Integration starts polling selected sensors |
+| **1. Connection Type** | Choose **Network** (TCP) or **USB Serial** |
+| **2. Connection Details** | Network: host + port. Serial: device path (e.g., `/dev/ttyUSB0`). Both: custom device name. |
+| **3. Sensor Selection** | Browse discovered sensors with live values, select which to monitor |
 
 ### Options (after setup)
 
@@ -155,9 +163,9 @@ The integration guides you through a **3-step setup**:
 
 ## Hardware Setup
 
-### Converter Configuration
+### Serial Settings (both connection types)
 
-Configure your TCP-to-serial converter to match the heater's COM1 serial settings:
+The heater's COM1 port uses these fixed settings:
 
 | Setting | Value |
 |---------|-------|
@@ -166,14 +174,23 @@ Configure your TCP-to-serial converter to match the heater's COM1 serial setting
 | Parity | None |
 | Stop Bits | 1 |
 | Flow Control | None |
-| Mode | **TCP Server** |
 
-### Wiring
+### Network: TCP-to-Serial Converter
 
-Connect the converter to **COM1** on the Lambdatronic mainboard using a **null-modem (crossed) RS232 cable**:
+Configure the converter to the settings above, set it to **TCP Server** mode, and note the IP address and port.
 
-| Converter (DB9) | Heater COM1 (DB9) |
-|-----------------|-------------------|
+### USB Serial: USB-to-RS232 Adapter
+
+Plug the adapter into your HA host. The device will appear as `/dev/ttyUSB0` (Linux) or `COM3` (Windows). No driver configuration needed for FTDI-based adapters.
+
+> **Tip:** On HA OS, USB devices are available under `/dev/ttyUSB0` or `/dev/ttyACM0`. Check **Settings > System > Hardware** to find your device path.
+
+### Wiring (both connection types)
+
+Connect your adapter to **COM1** on the Lambdatronic mainboard using a **null-modem (crossed) RS232 cable**:
+
+| Adapter (DB9) | Heater COM1 (DB9) |
+|---------------|-------------------|
 | Pin 2 (RX) | Pin 3 (TX) |
 | Pin 3 (TX) | Pin 2 (RX) |
 | Pin 5 (GND) | Pin 5 (GND) |

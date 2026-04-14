@@ -21,10 +21,8 @@ DOMAIN = "froeling"
 # Connection defaults
 # ---------------------------------------------------------------------------
 
-# Default target for the TCP-to-serial converter connected to COM1.
-DEFAULT_HOST = "192.168.88.180"
-
-# Default port used by TCP-to-serial converters and similar serial-over-TCP adapters.
+# No default host/port -- each user's setup is different.
+DEFAULT_HOST = ""
 DEFAULT_PORT = 8899
 
 # Default polling interval in seconds.  The heater's COM1 serial link is
@@ -39,9 +37,15 @@ MAX_SCAN_INTERVAL = 600   # 10 minutes is the longest that makes sense
 # Config entry keys
 # ---------------------------------------------------------------------------
 
+# Connection types
+CONN_TYPE_NETWORK = "network"
+CONN_TYPE_SERIAL = "serial"
+
 # Keys stored in config_entry.data (connection settings).
+CONF_CONNECTION_TYPE = "connection_type"
 CONF_HOST = "host"
 CONF_PORT = "port"
+CONF_SERIAL_DEVICE = "serial_device"
 CONF_DEVICE_NAME = "device_name"
 
 # Default device name shown in HA device registry

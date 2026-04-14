@@ -122,13 +122,20 @@ class FroelingClient:
         Per-operation timeout in seconds (default: 5.0).
     """
 
-    def __init__(self, host: str, port: int, timeout: float = 5.0) -> None:
+    def __init__(
+        self,
+        host: str = "",
+        port: int = 0,
+        serial_device: str = "",
+        timeout: float = 5.0,
+    ) -> None:
         # Store connection parameters so we can reconnect if needed.
         self._host = host
         self._port = port
+        self._serial_device = serial_device
         self._timeout = timeout
 
-        # The low-level TCP connection object.
+        # The low-level connection object (works for both TCP and serial).
         self._conn: FroelingConnection = FroelingConnection(timeout=timeout)
 
     # ------------------------------------------------------------------
@@ -141,23 +148,29 @@ class FroelingClient:
         return self._conn.is_connected
 
     async def connect(self) -> None:
-        """Open the TCP connection to the heater bridge.
+        """Open the connection to the heater (TCP or serial).
+
+        Automatically chooses TCP or serial based on which parameters
+        were provided at construction time. If serial_device is set,
+        opens a direct USB serial connection. Otherwise uses TCP.
 
         Raises
         ------
         FroelingConnectionError
-            If the TCP handshake fails.
+            If the connection cannot be established.
         """
         try:
-            await self._conn.connect(self._host, self._port)
+            if self._serial_device:
+                # Direct USB serial connection to COM1
+                await self._conn.connect_serial(self._serial_device)
+            else:
+                # Network connection via TCP-to-serial converter
+                await self._conn.connect(self._host, self._port)
         except (_ConnErr, _TimeoutErr) as exc:
             raise FroelingConnectionError(str(exc)) from exc
 
     async def disconnect(self) -> None:
-        """Close the TCP connection gracefully.
-
-        Safe to call even when already disconnected.
-        """
+        """Close the connection gracefully. Safe to call when already disconnected."""
         await self._conn.disconnect()
 
     # ------------------------------------------------------------------

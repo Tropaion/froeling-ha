@@ -6,8 +6,8 @@
   "documentation": "https://github.com/Tropaion/froeling-ha",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "requirements": [],
+  "requirements": ["pyserial-asyncio>=0.6"],
   "config_flow": true,
   "loggers": ["custom_components.froeling"],
-  "version": "0.5.1"
+  "version": "0.6.0"
 }

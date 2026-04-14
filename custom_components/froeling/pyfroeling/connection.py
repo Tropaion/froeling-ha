@@ -137,6 +137,52 @@ class FroelingConnection:
             ) from exc
         _log.info("Connected to Fröling bridge at %s:%d", host, port)
 
+    async def connect_serial(self, device: str, baudrate: int = 57600) -> None:
+        """Open a direct USB serial connection to the heater's COM1 port.
+
+        Uses pyserial-asyncio to open the serial device. The returned
+        reader/writer streams are API-compatible with asyncio TCP streams,
+        so the rest of the protocol code works unchanged.
+
+        Parameters
+        ----------
+        device:
+            Serial device path (e.g., /dev/ttyUSB0, COM3).
+        baudrate:
+            Baud rate -- always 57600 for the Lambdatronic protocol.
+
+        Raises
+        ------
+        ConnectionError
+            If the serial port cannot be opened.
+        """
+        _log.debug("Opening serial port %s at %d baud", device, baudrate)
+        try:
+            import serial_asyncio_fast as serial_asyncio
+        except ImportError:
+            try:
+                import serial_asyncio
+            except ImportError:
+                raise ConnectionError(
+                    "pyserial-asyncio is required for USB serial connections. "
+                    "Install it with: pip install pyserial-asyncio"
+                )
+        try:
+            self._reader, self._writer = await serial_asyncio.open_serial_connection(
+                url=device,
+                baudrate=baudrate,
+                bytesize=8,       # 8 data bits
+                parity="N",       # No parity
+                stopbits=1,       # 1 stop bit
+                xonxoff=False,    # No software flow control
+                rtscts=False,     # No hardware flow control
+            )
+        except Exception as exc:
+            raise ConnectionError(
+                f"Cannot open serial port {device}: {exc}"
+            ) from exc
+        _log.info("Connected to Fröling heater via serial port %s", device)
+
     async def disconnect(self) -> None:
         """Close the TCP connection gracefully.
 
