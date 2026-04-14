@@ -141,31 +141,21 @@ def _sensors_to_select_options(
     - Sensors that couldn't be read (connection error)
     - Temperature sensors reading exactly 0.0°C (no physical sensor connected)
 
-    Deduplication:
-    - Sensors with identical title AND identical value are reduced to one entry
-      (same physical sensor exposed at multiple addresses)
-    - Sensors with the same title but different values get an address suffix
-      to distinguish them (different heating circuits, etc.)
+    When the same title appears multiple times (e.g. "Außentemperatur" for
+    different heating circuits), the address is appended to distinguish them.
+    No deduplication -- all sensors are always shown.
     """
-    # Step 1: Filter out absent sensors
+    from collections import Counter
+
+    # Filter out absent sensors
     present = [s for s in sensors if not _is_likely_absent(s) or include_absent]
 
-    # Step 2: Detect duplicate titles
-    # Count how many times each (title, value_rounded) combination appears
-    from collections import Counter
+    # Count titles to detect duplicates
     title_counts = Counter(s.spec.title for s in present)
-    seen_title_value: dict[tuple[str, float | None], bool] = {}
 
     options: list[SelectOptionDict] = []
     for sensor in present:
         title = sensor.spec.title
-        value = round(sensor.value, 1) if sensor.value is not None else None
-
-        # Skip exact duplicates (same title AND same value = same physical sensor)
-        key = (title, value)
-        if key in seen_title_value:
-            continue
-        seen_title_value[key] = True
 
         # Build label with current value
         if sensor.readable and sensor.value is not None:
@@ -176,7 +166,7 @@ def _sensors_to_select_options(
         else:
             label = f"{title} (nicht verfügbar)"
 
-        # Append address for remaining duplicates (same title, different values)
+        # Append address when the same title appears more than once
         if title_counts[title] > 1:
             label = f"{label}  [0x{sensor.spec.address:04X}]"
 
