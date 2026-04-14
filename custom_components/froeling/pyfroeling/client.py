@@ -349,6 +349,7 @@ class FroelingClient:
             On communication failure during any page request.
         """
         specs: list[ValueSpec] = []
+        seen_addresses: set[int] = set()  # Track addresses to skip duplicates
         first = True
 
         for page_num in range(_MAX_PAGES):
@@ -357,7 +358,6 @@ class FroelingClient:
             data = parse_value_spec_response(raw)
 
             if not data.get("more", False):
-                # End-of-list sentinel received.
                 _log.debug(
                     "discover_sensors: received end-of-list after %d specs", len(specs)
                 )
@@ -370,18 +370,32 @@ class FroelingClient:
                 first = False
                 continue
 
+            address = data["address"]
+
+            # The heater often reports the same address multiple times in the
+            # value list (e.g. "Außentemperatur" at 0x0004 appears 5+ times).
+            # Reading the same address twice gives the same value, so skip dupes.
+            if address in seen_addresses:
+                _log.debug(
+                    "discover_sensors page %d: skipping duplicate address 0x%04X '%s'",
+                    page_num, address, data["title"],
+                )
+                first = False
+                continue
+            seen_addresses.add(address)
+
             specs.append(ValueSpec(
-                address   = data["address"],
+                address   = address,
                 factor    = data["factor"],
                 unit      = data["unit"],
                 title     = data["title"],
                 menu_type = data["menu_type"],
             ))
-            first = False  # All pages after the first use the NEXT command.
+            first = False
 
             _log.debug(
                 "discover_sensors page %d: 0x%04X '%s'",
-                page_num, data["address"], data["title"],
+                page_num, address, data["title"],
             )
         else:
             _log.warning(
