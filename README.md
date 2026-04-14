@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="custom_components/froeling/brand/icon.png" alt="Fröling Heater" width="120">
+  <img src="https://raw.githubusercontent.com/Tropaion/froeling-ha/main/custom_components/froeling/brand/icon.png" alt="Fröling Heater" width="120">
 </p>
 
 <h1 align="center">Fröling Heater Integration for Home Assistant</h1>
