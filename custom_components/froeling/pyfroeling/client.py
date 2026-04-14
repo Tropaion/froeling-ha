@@ -110,7 +110,7 @@ class FroelingClient:
     """High-level async API for reading data from a Fröling heater.
 
     All I/O is performed over a single persistent TCP connection to a
-    TCP-to-RS232 bridge (e.g. Elfin EE10) connected to the heater's COM1 port.
+    TCP-to-serial converter connected to the heater's COM1 port.
 
     Parameters
     ----------

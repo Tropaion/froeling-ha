@@ -1,169 +1,247 @@
-# Fröling Heater Integration for Home Assistant
+<p align="center">
+  <img src="custom_components/froeling/brand/icon.png" alt="Fröling Heater" width="120">
+</p>
 
-[![HACS Custom](https://img.shields.io/badge/HACS-Custom-41BDF5.svg)](https://github.com/hacs/integration)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+<h1 align="center">Fröling Heater Integration for Home Assistant</h1>
 
-A Home Assistant custom integration for **Fröling pellet heaters** that communicates via the proprietary binary protocol on COM1 (the service interface). Connects through a TCP-to-serial converter such as the Elfin EE10.
+<p align="center">
+  <a href="https://github.com/hacs/integration"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge" alt="HACS Custom"></a>
+  <a href="https://www.gnu.org/licenses/gpl-3.0"><img src="https://img.shields.io/badge/License-GPLv3-blue.svg?style=for-the-badge" alt="License: GPL v3"></a>
+  <a href="https://github.com/Tropaion/froeling-ha/releases"><img src="https://img.shields.io/github/v/release/Tropaion/froeling-ha?style=for-the-badge&color=green" alt="Latest Release"></a>
+</p>
+
+<p align="center">
+  A Home Assistant custom integration for <b>Fröling pellet heaters</b><br>
+  Reads sensor data, operating state, and error logs via the proprietary COM1 protocol
+</p>
+
+---
 
 ## Supported Hardware
 
+<table>
+  <tr>
+    <td width="50%">
+
 ### Heaters
 
-Any Fröling heater with a **Lambdatronic P 3200** or **S 3200** controller, including:
+Any Fröling heater with a **Lambdatronic P 3200** or **S 3200** controller:
 
-- Fröling **P1** Pellet (7-20 kW)
-- Fröling **PE1** Pellet (15-35 kW)
-- Fröling **P4** Pellet
-- Other models using the Lambdatronic 3200 controller family
+| Model | Power Range |
+|-------|-------------|
+| Fröling **P1** Pellet | 7 - 20 kW |
+| Fröling **PE1** Pellet | 15 - 35 kW |
+| Fröling **P4** Pellet | 15 - 105 kW |
+| Other Lambdatronic 3200 models | varies |
+
+</td>
+<td width="50%">
 
 ### Connection
 
-The integration connects to the heater's **COM1** (service interface) via a network-to-serial converter:
+Requires a **TCP-to-serial converter** connected to the heater's **COM1** port:
 
-- **Elfin EE10** (tested)
-- **Waveshare RS232 to Ethernet** (should work)
-- Any TCP-to-RS232 bridge connected to COM1
+| Converter | Status |
+|-----------|--------|
+| Elfin EE10 | Tested |
+| Waveshare RS232-to-Ethernet | Compatible |
+| Any TCP-to-RS232 bridge | Should work |
+
+</td>
+  </tr>
+</table>
 
 ```
-Fröling Heater (COM1 RS232) ──── Elfin EE10 ──── TCP/IP ──── Home Assistant
+ ┌──────────────┐    RS232     ┌────────────────────┐    TCP/IP    ┌─────────────────┐
+ │  Fröling P1  │◄────────────►│  TCP-to-serial     │◄────────────►│  Home Assistant  │
+ │  COM1 (DB9)  │  null-modem  │  converter         │   network    │  Integration     │
+ └──────────────┘              └────────────────────┘              └─────────────────┘
 ```
 
-> **Note:** This integration uses the COM1 service interface with the proprietary binary protocol, **not** COM2/Modbus. The converter must be physically connected to the COM1 DB9 port on the Lambdatronic board.
+> **Note:** This integration uses the **COM1 service interface** with the proprietary binary protocol, **not** COM2/Modbus. The converter must be physically connected to the **COM1 DB9 port** on the Lambdatronic board.
+
+---
 
 ## Features
 
-### Sensors
+### Sensor Discovery
 
-The integration automatically discovers all available sensors from your heater. Typical sensors include:
+The integration **automatically discovers all available sensors** from your heater during setup. You choose which sensors to monitor -- only selected sensors are polled, minimizing serial traffic.
 
-| Type | Examples |
-|------|----------|
-| Temperatures | Boiler temperature, exhaust gas, buffer top/bottom, flow/return |
-| Analog outputs | Pump speed, valve position (%) |
-| Operating state | "Heizen", "Brenner aus", "Anheizen", "Störung", ... |
-| Operating mode | "Automatik", "Übergangsbetrieb", ... |
-| Error tracking | Active error count, last error text |
+<table>
+  <tr>
+    <td width="50%">
 
-### Binary Sensors
+#### Sensors
 
 | Type | Examples |
 |------|----------|
-| Digital outputs | Pumps (on/off), valves (open/closed) |
-| Digital inputs | Door contacts, safety switches |
-| Heater error | ON when the heater reports a fault condition |
+| Temperatures | Boiler, exhaust gas, buffer, flow/return |
+| Percentages | Pump speed, valve position, fan speed |
+| Operating state | "Heizen", "Brenner aus", "Störung" |
+| Operating mode | "Automatik", "Übergangsbetrieb" |
+| Counters | Operating hours, pellet consumption |
+| Errors | Active count, last error text |
 
-### Error Monitoring
+</td>
+<td width="50%">
 
-- **Active error count** -- number of currently active errors
-- **Last error** -- text description of the most recent error
-- **Error binary sensor** -- ON when any fault state is detected (codes: Störung, Fehler)
-- **Full error log** available in the HA diagnostics panel with timestamps and lifecycle states (arrived / acknowledged / gone)
+#### Binary Sensors
 
-### Diagnostics
+| Type | Device Class |
+|------|--------------|
+| Heater fault state | `problem` |
+
+#### Error Monitoring
+
+| Entity | Description |
+|--------|-------------|
+| Active Errors | Count of unacknowledged errors |
+| Last Error | Error text + state (aktiv/quittiert/gegangen) |
+| Heater Error | ON during fault conditions |
+
+</td>
+  </tr>
+</table>
+
+#### Diagnostics
 
 Access detailed diagnostic data via **Settings > Integrations > Fröling Heater > Diagnostics**:
 
-- Firmware version
-- Heater date/time
-- Complete error log
-- All discovered sensor specifications
+> Firmware version, heater date/time, complete error log with timestamps, all discovered sensor specifications
+
+---
 
 ## Installation
 
 ### HACS (Recommended)
 
 1. Open **HACS** in Home Assistant
-2. Go to **Integrations**
-3. Click the **three-dot menu** (top right) > **Custom repositories**
-4. Enter: `https://github.com/Tropaion/froeling-ha`
-5. Category: **Integration**
-6. Click **Add**
-7. Find **"Fröling Heater"** in the integration list and click **Install**
-8. **Restart Home Assistant**
+2. Go to **Integrations** > **three-dot menu** > **Custom repositories**
+3. Enter: `https://github.com/Tropaion/froeling-ha` | Category: **Integration**
+4. Find **"Fröling Heater"** and click **Install**
+5. **Restart Home Assistant**
 
-### Manual Installation
+### Manual
 
-1. Download the latest release from [GitHub](https://github.com/Tropaion/froeling-ha)
-2. Copy the `custom_components/froeling/` folder to your Home Assistant `config/custom_components/` directory
+1. Download the [latest release](https://github.com/Tropaion/froeling-ha/releases)
+2. Copy `custom_components/froeling/` to your HA `config/custom_components/`
 3. Restart Home Assistant
+
+---
 
 ## Configuration
 
-1. Go to **Settings** > **Integrations** > **Add Integration**
-2. Search for **"Fröling"**
-3. Enter the connection details:
-   - **Host**: IP address of your TCP-to-serial converter (e.g., `192.168.88.180`)
-   - **Port**: TCP port number (e.g., `8899`)
-4. The integration will test the connection and discover all available sensors automatically
+### Setup Flow
+
+The integration guides you through a **3-step setup**:
+
+| Step | Description |
+|------|-------------|
+| **1. Connection** | Enter device name, host IP, and port of your converter |
+| **2. Sensor Selection** | Browse discovered sensors with live values, select which to monitor |
+| **3. Done** | Integration starts polling selected sensors |
+
+### Options (after setup)
+
+**Settings > Integrations > Fröling Heater > Configure**
+
+| Option | Default | Range |
+|--------|---------|-------|
+| Polling interval | 60 seconds | 10 - 600 seconds |
+| Sensor selection | Changeable | Re-discover and re-select |
+
+---
 
 ## Hardware Setup
 
-### Elfin EE10 Configuration
+### Converter Configuration
 
-Configure the Elfin EE10 to match the heater's COM1 serial settings:
+Configure your TCP-to-serial converter to match the heater's COM1 serial settings:
 
 | Setting | Value |
 |---------|-------|
-| Baud Rate | 57600 |
+| Baud Rate | **57600** |
 | Data Bits | 8 |
 | Parity | None |
 | Stop Bits | 1 |
 | Flow Control | None |
-| Mode | TCP Server |
+| Mode | **TCP Server** |
 
 ### Wiring
 
-Connect the EE10 to the **COM1** DB9 port on the Lambdatronic mainboard using a **null-modem (crossed) RS232 cable**:
+Connect the converter to **COM1** on the Lambdatronic mainboard using a **null-modem (crossed) RS232 cable**:
 
-| EE10 (DB9) | Heater COM1 (DB9) |
-|------------|-------------------|
+| Converter (DB9) | Heater COM1 (DB9) |
+|-----------------|-------------------|
 | Pin 2 (RX) | Pin 3 (TX) |
 | Pin 3 (TX) | Pin 2 (RX) |
 | Pin 5 (GND) | Pin 5 (GND) |
 
+---
+
 ## How It Works
 
-The integration implements the proprietary binary protocol used by Fröling Lambdatronic controllers on their COM1 service interface. This is the same protocol used by the [linux-p4d](https://github.com/horchi/linux-p4d) project, reimplemented in async Python.
+This integration reimplements the proprietary binary protocol used by Fröling Lambdatronic controllers on their COM1 service interface. The protocol was reverse-engineered by the [linux-p4d](https://github.com/horchi/linux-p4d) project.
 
-- **Polling interval**: 60 seconds
-- **Protocol**: Binary frames with CRC verification and byte escaping
-- **Sensor discovery**: Automatic -- the heater reports all available sensor addresses on startup
-- **Read-only**: v0.1 does not write parameters or control outputs
+| Aspect | Detail |
+|--------|--------|
+| Protocol | Binary frames with CRC verification and byte escaping |
+| Polling | Configurable interval (default 60s), only enabled sensors |
+| Discovery | Automatic -- heater reports all available sensor addresses |
+| Scope | **Read-only** in current version |
+
+---
 
 ## Troubleshooting
 
-### "Failed to connect to the heater"
+<details>
+<summary><b>"Failed to connect to the heater"</b></summary>
 
-- Verify the EE10 is powered and has network connectivity (`ping 192.168.88.180`)
-- Check that the EE10 is in TCP Server mode on the correct port
+- Verify the converter is powered and reachable (`ping <converter-ip>`)
+- Check that the converter is in **TCP Server** mode on the correct port
 - Ensure the RS232 cable is connected to **COM1** (not COM2)
-- Check the EE10 baud rate is set to **57600**
-- Only one TCP client can connect to the EE10 at a time -- close any other connections (e.g., socat)
+- Verify baud rate is set to **57600**
+- Only one TCP client can connect at a time -- close other connections (e.g., socat)
 
-### No sensors discovered
+</details>
 
-- The heater must be powered on (not just the controller, the heater itself)
-- Check the HA logs for "Discovered X sensors" messages
-- Try restarting the integration
+<details>
+<summary><b>No sensors discovered</b></summary>
 
-### Sensor values seem wrong
+- The heater must be fully powered on (not just the controller display)
+- Check HA logs for "Discovered X sensors" messages
+- Try removing and re-adding the integration
 
-- Check the HA diagnostics panel for the raw sensor specs (factor, unit)
-- Some sensors may report 0 when the heater is in standby
+</details>
+
+<details>
+<summary><b>Sensor values seem wrong</b></summary>
+
+- Check the diagnostics panel for raw sensor specs (factor, unit)
+- Some sensors report 0 when the heater is in standby
+- Temperature sensors reading 0.0°C during setup are filtered (no physical sensor connected)
+
+</details>
+
+---
 
 ## Attribution & Acknowledgements
 
 This integration would not be possible without the **[linux-p4d](https://github.com/horchi/linux-p4d)** project by **[Jörg Wendel (@horchi)](https://github.com/horchi)**, which reverse-engineered the proprietary binary protocol used by Fröling Lambdatronic controllers on the COM1 service interface.
 
-The `pyfroeling` protocol library bundled in this integration is a clean-room Python reimplementation of the protocol as documented in the linux-p4d source code (specifically `p4io.c`, `service.h`, `service.c`, and `lib/common.c`). No code was copied from linux-p4d -- only the protocol specification (frame format, byte escaping rules, CRC algorithm, command codes, and response structures) was referenced.
+The `pyfroeling` protocol library bundled in this integration is a **clean-room Python reimplementation** of the protocol as documented in the linux-p4d source code (`p4io.c`, `service.h`, `service.c`, `lib/common.c`). No code was copied -- only the protocol specification (frame format, byte escaping rules, CRC algorithm, command codes, and response structures) was referenced.
 
 linux-p4d is licensed under the [GNU General Public License v2.0](https://github.com/horchi/linux-p4d/blob/master/LICENSE).
 
-### Additional Credits
+### Credits
 
+- Protocol: [linux-p4d](https://github.com/horchi/linux-p4d) by [@horchi](https://github.com/horchi)
 - Built with [Claude Code](https://claude.ai/claude-code)
-- Inspired by the [ha_froeling_lambdatronic_modbus](https://github.com/GyroGearl00se/ha_froeling_lambdatronic_modbus) and [pe1-modbus](https://github.com/smokyflex/pe1-modbus) community integrations
+- Inspired by [ha_froeling_lambdatronic_modbus](https://github.com/GyroGearl00se/ha_froeling_lambdatronic_modbus) and [pe1-modbus](https://github.com/smokyflex/pe1-modbus)
 
-## License
+---
 
-This project is licensed under the GNU General Public License v3.0 -- see the [LICENSE](LICENSE) file for details.
+<p align="center">
+  <sub>Licensed under the <a href="https://www.gnu.org/licenses/gpl-3.0">GNU General Public License v3.0</a></sub>
+</p>

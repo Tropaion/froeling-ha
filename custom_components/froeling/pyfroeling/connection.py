@@ -1,7 +1,7 @@
 """Async TCP connection layer for the Fröling Lambdatronic P/S 3200 protocol.
 
 This module handles the raw TCP byte stream to/from the serial bridge
-(e.g. Elfin EE10) that is connected to the controller's COM1 service port.
+that is connected to the controller's COM1 service port.
 
 Responsibilities:
   - Open / close an asyncio TCP stream to the bridge.
@@ -53,7 +53,7 @@ class TimeoutError(Exception):
 class FroelingConnection:
     """Manages a single async TCP connection to the Fröling serial bridge.
 
-    The bridge (e.g. Elfin EE10) is a TCP-to-RS232 adapter that forwards
+    The bridge is a TCP-to-serial adapter that forwards
     bytes between a TCP socket and the controller's COM1 service port.
 
     Usage pattern::
@@ -120,7 +120,7 @@ class FroelingConnection:
         host:
             Hostname or IP address of the TCP-to-serial bridge.
         port:
-            TCP port the bridge listens on (commonly 8899 for Elfin EE10).
+            TCP port the bridge listens on (commonly 8899).
 
         Raises
         ------

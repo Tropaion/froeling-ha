@@ -24,7 +24,7 @@ DOMAIN = "froeling"
 # Default target for the TCP-to-serial converter connected to COM1.
 DEFAULT_HOST = "192.168.88.180"
 
-# Default port used by the Elfin EE10 and similar serial-over-TCP adapters.
+# Default port used by TCP-to-serial converters and similar serial-over-TCP adapters.
 DEFAULT_PORT = 8899
 
 # Default polling interval in seconds.  The heater's COM1 serial link is

@@ -1,7 +1,7 @@
 # Fröling HA Integration
 
 ## Project Overview
-Home Assistant custom integration for Fröling pellet heaters (P1, PE1, and other models using Lambdatronic P/S 3200 controllers). Communicates via the proprietary binary protocol on COM1 through a TCP-to-serial converter (e.g., Elfin EE10).
+Home Assistant custom integration for Fröling pellet heaters (P1, PE1, and other models using Lambdatronic P/S 3200 controllers). Communicates via the proprietary binary protocol on COM1 through a TCP-to-serial converter.
 
 ## Architecture
 - `custom_components/froeling/pyfroeling/` -- Pure Python async protocol library

@@ -2,7 +2,7 @@
 
 Reads sensor data, heater state, and error logs from Fröling pellet heaters
 via the proprietary binary protocol on COM1, connected through a TCP-to-serial
-bridge (e.g., Elfin EE10).
+bridge.
 
 Entry point called by HA when the integration is loaded or unloaded:
 
@@ -172,7 +172,7 @@ async def async_unload_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> boo
 
     if unload_ok:
         # Disconnect the TCP client so the serial bridge can accept new
-        # connections (the Elfin EE10 typically allows only one TCP client).
+        # connections (many TCP-to-serial converters allow only one TCP client).
         coordinator: FroelingCoordinator = entry.runtime_data
         await coordinator.client.disconnect()
         _LOGGER.debug("Fröling TCP client disconnected")

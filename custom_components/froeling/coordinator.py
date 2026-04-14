@@ -191,8 +191,8 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         """
         try:
             # --- Reconnect if needed ---
-            # The TCP connection might have been dropped by the bridge device
-            # (e.g., Elfin EE10 has a configurable idle timeout).
+            # The TCP connection might have been dropped by the serial bridge
+            # (many converters have a configurable idle timeout).
             if not self.client.is_connected:
                 _LOGGER.info(
                     "FroelingCoordinator: TCP connection lost, reconnecting…"
