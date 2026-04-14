@@ -15,7 +15,8 @@ Wire frame layout (unescaped)
                   trailing CRC byte).  The size field itself is also escaped.
     - Command   : one byte from the Command enum.
     - Payload   : command-specific bytes (0 to MAX_PAYLOAD_SIZE bytes).
-    - CRC       : single byte XOR checksum over command+payload (see calculate_crc).
+    - CRC       : single byte XOR checksum over the full unescaped frame (sync ID +
+                  size + command + payload), CRC byte itself excluded.
 
 Escaping
 --------
@@ -66,8 +67,9 @@ def calculate_crc(data: bytes) -> int:
             crc   = crc ^ (b ^ dummy)  # XOR current crc with b XOR (b<<1)
         return crc & 0xFF
 
-    The CRC is computed over the *unescaped* frame bytes starting from the
-    command byte through to (but not including) the CRC byte itself.
+    The CRC is computed over the *unescaped* full frame: sync ID (0x02FD, 2 bytes)
+    + size (2 bytes) + command (1 byte) + payload – up to but not including the
+    CRC byte itself.  This matches the linux-p4d reference implementation.
 
     Parameters
     ----------
@@ -218,21 +220,28 @@ def build_frame(command: Command, payload: bytes = b"") -> bytes:
     # (command byte + payload + CRC byte).
     size: int = len(payload) + SIZE_CRC  # +1 for the CRC byte
 
-    # Build the unescaped body: size (2 bytes, BE) + command (1 byte) + payload.
-    # The CRC is computed over command + payload only.
-    crc_input: bytes = bytes([command]) + payload
-    crc: int = calculate_crc(crc_input)
+    # The sync word (COMM_ID) is the first 2 bytes of every unescaped frame.
+    sync: bytes = COMM_ID.to_bytes(2, byteorder="big")  # 0x02, 0xFD
 
-    # Assemble the full unescaped frame body (everything after the sync word).
+    # Build the full raw (unescaped) frame *excluding* the CRC byte.
+    # CRC is computed over the FULL unescaped frame: sync_id(2) + size(2) +
+    # command(1) + payload – matching the linux-p4d reference implementation.
+    raw_frame_no_crc: bytes = (
+        sync                               # 2-byte sync word
+        + size.to_bytes(2, byteorder="big")  # 16-bit big-endian size field
+        + bytes([command])                   # command byte
+        + payload                            # variable-length payload
+    )
+    crc: int = calculate_crc(raw_frame_no_crc)
+
+    # Assemble the full unescaped frame body (everything after the sync word),
+    # appending the computed CRC byte.
     body: bytes = (
         size.to_bytes(2, byteorder="big")  # 16-bit big-endian size field
         + bytes([command])                  # command byte
         + payload                           # variable-length payload
         + bytes([crc])                      # trailing CRC byte
     )
-
-    # The sync word is transmitted raw (never escaped).
-    sync: bytes = COMM_ID.to_bytes(2, byteorder="big")  # 0x02, 0xFD
 
     # Escape all bytes that follow the sync word.
     escaped_body: bytes = escape_bytes(body)

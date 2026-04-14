@@ -53,7 +53,7 @@ from .commands import (
 from .connection import FroelingConnection
 from .connection import ConnectionError as _ConnErr
 from .connection import TimeoutError as _TimeoutErr
-from .const import ERROR_STATE_CODES, Command, MenuStructType
+from .const import COMM_ID, ERROR_STATE_CODES, Command, MenuStructType
 from .models import (
     ConfigParameter,
     ErrorEntry,
@@ -62,7 +62,7 @@ from .models import (
     SensorValue,
     ValueSpec,
 )
-from .protocol import build_frame
+from .protocol import build_frame, calculate_crc
 
 _log = logging.getLogger(__name__)
 
@@ -603,6 +603,31 @@ class FroelingClient:
                     f"Empty response for command {command.name} – missing CRC byte."
                 )
 
-            # Strip the trailing CRC byte; the caller only needs the payload.
-            payload_only = payload_with_crc[:-1]
+            # --- Verify the response CRC ---
+            # The CRC is the last byte of payload_with_crc.
+            received_crc: int = payload_with_crc[-1]
+            payload_only: bytes = payload_with_crc[:-1]
+
+            # Reconstruct the full unescaped response frame (excluding CRC) so we
+            # can recompute the expected CRC.  The frame header is:
+            #   sync_id (2 bytes, 0x02FD) + size (2 bytes, BE) + command (1 byte)
+            # followed by the payload bytes (without CRC).
+            # Note: read_response() returns (command_byte, size, payload_with_crc)
+            # where size == len(payload_with_crc) (includes the CRC byte itself).
+            sync_bytes: bytes = COMM_ID.to_bytes(2, byteorder="big")
+            size_bytes: bytes = _size.to_bytes(2, byteorder="big")
+            crc_input: bytes = (
+                sync_bytes
+                + size_bytes
+                + bytes([resp_cmd])
+                + payload_only
+            )
+            expected_crc: int = calculate_crc(crc_input)
+
+            if received_crc != expected_crc:
+                raise FroelingProtocolError(
+                    f"CRC mismatch for command {command.name}: "
+                    f"expected 0x{expected_crc:02X}, got 0x{received_crc:02X}."
+                )
+
             return payload_only

@@ -52,5 +52,8 @@ CONF_PORT = "port"
 UNIT_DEVICE_CLASS_MAP: dict[str, SensorDeviceClass] = {
     "°C": SensorDeviceClass.TEMPERATURE,  # Temperature sensors (Boiler, buffer, etc.)
     "bar": SensorDeviceClass.PRESSURE,    # Pressure sensors (system pressure)
-    "%": SensorDeviceClass.POWER_FACTOR,  # Percentage values (fan speed, modulation)
+    # NOTE: "%" is intentionally not mapped to POWER_FACTOR.  POWER_FACTOR is an
+    # electrical cos(phi) device class and is inappropriate for heater percentages
+    # such as fan speed or pump modulation.  Percentage sensors will have
+    # device_class=None and display correctly with a plain "%" unit.
 }

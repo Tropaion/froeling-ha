@@ -244,8 +244,9 @@ class FroelingActiveErrorCountSensor(FroelingEntity, SensorEntity):
         return sum(
             1
             for err in self.coordinator.data.errors
-            # ErrorState is an IntEnum / bitmask: ARRIVED = 1
-            if err.state == ErrorState.ARRIVED
+            # Use bitmask test so combined states (e.g. ARRIVED | ACKNOWLEDGED = 3)
+            # are also counted as active.  ErrorState.ARRIVED == 1.
+            if err.state & ErrorState.ARRIVED
         )
 
 

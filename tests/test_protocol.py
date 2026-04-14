@@ -578,8 +578,10 @@ class TestFrameBuilding:
         assert payload == b""
         # size = len(payload) + SIZE_CRC = 0 + 1 = 1
         assert size == 1
-        # CRC over just the command byte
-        assert crc == calculate_crc(bytes([Command.CHECK]))
+        # CRC is computed over the full unescaped frame:
+        # sync_id(2) + size(2) + command(1) + payload
+        full_frame = COMM_ID.to_bytes(2, "big") + size.to_bytes(2, "big") + bytes([Command.CHECK])
+        assert crc == calculate_crc(full_frame)
 
     def test_build_get_value_with_address(self) -> None:
         """build_frame for GET_VALUE with a 2-byte address payload."""
@@ -592,7 +594,14 @@ class TestFrameBuilding:
         assert payload == address_bytes
         # size = 2 (payload) + 1 (CRC) = 3
         assert size == 3
-        expected_crc = calculate_crc(bytes([Command.GET_VALUE]) + address_bytes)
+        # CRC is computed over the full unescaped frame including sync_id and size.
+        full_frame = (
+            COMM_ID.to_bytes(2, "big")
+            + size.to_bytes(2, "big")
+            + bytes([Command.GET_VALUE])
+            + address_bytes
+        )
+        expected_crc = calculate_crc(full_frame)
         assert crc == expected_crc
 
     def test_build_get_state_no_payload(self) -> None:
@@ -611,12 +620,50 @@ class TestFrameBuilding:
         assert frame[1] == 0xFD
 
     def test_build_frame_crc_is_correct(self) -> None:
-        """CRC in built frame must match manual calculation."""
+        """CRC in built frame must match manual calculation over the full frame."""
         payload = b"\x01\x02\x03"
         frame = build_frame(Command.GET_VERSION, payload)
-        _, _, command, parsed_payload, frame_crc = self._unpack_frame(frame)
-        expected_crc = calculate_crc(bytes([Command.GET_VERSION]) + payload)
+        _, size, command, parsed_payload, frame_crc = self._unpack_frame(frame)
+        # CRC covers: sync_id(2) + size(2) + command(1) + payload
+        full_frame = (
+            COMM_ID.to_bytes(2, "big")
+            + size.to_bytes(2, "big")
+            + bytes([Command.GET_VERSION])
+            + payload
+        )
+        expected_crc = calculate_crc(full_frame)
         assert frame_crc == expected_crc
+
+    def test_crc_covers_full_frame_including_sync(self) -> None:
+        """CRC must differ when computed over full frame vs command+payload only.
+
+        This test guards against regressions where CRC is accidentally computed
+        over only the command+payload portion instead of the full unescaped frame
+        (sync_id + size + command + payload) as required by the linux-p4d spec.
+        """
+        payload = b"\xAB\xCD"
+        frame = build_frame(Command.GET_VALUE, payload)
+        _, size, command, parsed_payload, frame_crc = self._unpack_frame(frame)
+
+        # CRC over full frame (correct scope)
+        full_frame = (
+            COMM_ID.to_bytes(2, "big")
+            + size.to_bytes(2, "big")
+            + bytes([Command.GET_VALUE])
+            + payload
+        )
+        crc_full = calculate_crc(full_frame)
+
+        # CRC over command+payload only (old/wrong scope)
+        crc_cmd_payload_only = calculate_crc(bytes([Command.GET_VALUE]) + payload)
+
+        # The frame should contain the full-frame CRC, not the shorter one.
+        assert frame_crc == crc_full
+        # The two CRC scopes must differ for this input (otherwise the test is vacuous).
+        assert crc_full != crc_cmd_payload_only, (
+            "Test input chose data where both CRC scopes happen to agree; "
+            "pick a different payload to make this test meaningful."
+        )
 
     def test_build_frame_payload_too_large_raises(self) -> None:
         """build_frame must raise ValueError when payload exceeds MAX_PAYLOAD_SIZE."""

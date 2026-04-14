@@ -1,0 +1,21 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Fröling Heater Connection",
+        "description": "Enter the IP address and port of your TCP-to-serial converter (e.g., Elfin EE10) connected to the heater's COM1 port.",
+        "data": {
+          "host": "Host",
+          "port": "Port"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the heater. Check host, port, and cable.",
+      "unknown": "An unexpected error occurred."
+    },
+    "abort": {
+      "already_configured": "This heater is already configured."
+    }
+  }
+}
