@@ -43,6 +43,9 @@ MAX_SCAN_INTERVAL = 600   # 10 minutes is the longest that makes sense
 CONF_HOST = "host"
 CONF_PORT = "port"
 
+# Keys stored in config_entry.data (selected sensors from setup flow).
+CONF_SELECTED_SENSORS = "selected_sensors"
+
 # Keys stored in config_entry.options (user-adjustable settings).
 CONF_SCAN_INTERVAL = "scan_interval"
 

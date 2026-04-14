@@ -64,11 +64,25 @@ async def async_setup_entry(
 
     entities: list[FroelingEntity] = []
 
-    # --- Dynamic value sensors from discovered specs ---
-    # ALL sensors discovered via cmdGetValueListFirst/Next are readable with
-    # cmdGetValue (0x30) regardless of menu_type.  This matches linux-p4d
-    # which stores every ValueSpec as type "VA".
+    # --- Dynamic value sensors from selected specs ---
+    # Only create entities for sensors the user selected during setup.
+    # The coordinator's _get_selected_specs() handles the filtering for
+    # polling; here we create matching entities.
+    from .const import CONF_SELECTED_SENSORS
+
+    selected = entry.data.get(CONF_SELECTED_SENSORS, [])
+    selected_addrs = set()
+    for addr_str in selected:
+        try:
+            selected_addrs.add(int(addr_str, 16))
+        except ValueError:
+            pass
+
     for spec in coordinator.data.specs:
+        # If a selection exists, only create entities for selected addresses.
+        # If no selection (backwards compat), create entities for all.
+        if selected and spec.address not in selected_addrs:
+            continue
         entities.append(
             FroelingValueSensor(
                 coordinator, spec.address, spec.title, spec.unit, sensor_type="VA"

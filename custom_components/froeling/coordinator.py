@@ -16,10 +16,9 @@ from datetime import timedelta
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import CONF_SCAN_INTERVAL, CONF_SELECTED_SENSORS, DEFAULT_SCAN_INTERVAL, DOMAIN
 from .pyfroeling import (
     ErrorEntry,
     FroelingClient,
@@ -207,22 +206,14 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
                 status.state_text, status.mode_text, status.is_error,
             )
 
-            # --- Fetch only ENABLED sensor values ---
-            # Build the set of addresses that have enabled entities in HA.
-            # This avoids polling sensors the user has disabled, reducing
-            # serial traffic from ~120 requests to only the ones in use.
-            enabled_addresses = self._get_enabled_sensor_addresses()
-
-            if enabled_addresses is not None:
-                # Filter specs to only those with enabled entities
-                active_specs = [s for s in self._specs if s.address in enabled_addresses]
-                _LOGGER.debug(
-                    "FroelingCoordinator: polling %d of %d sensors (rest disabled)",
-                    len(active_specs), len(self._specs),
-                )
-            else:
-                # Fallback: if we can't determine enabled entities, poll all
-                active_specs = self._specs
+            # --- Fetch only SELECTED sensor values ---
+            # The user chose which sensors to enable during setup.
+            # Only poll those addresses to minimize serial traffic.
+            active_specs = self._get_selected_specs()
+            _LOGGER.debug(
+                "FroelingCoordinator: polling %d of %d sensors",
+                len(active_specs), len(self._specs),
+            )
 
             values = await self.client.get_all_values(active_specs)
             _LOGGER.debug(
@@ -255,39 +246,27 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
     # Helpers
     # ------------------------------------------------------------------
 
-    def _get_enabled_sensor_addresses(self) -> set[int] | None:
-        """Return the set of sensor addresses that have enabled HA entities.
+    def _get_selected_specs(self) -> list[ValueSpec]:
+        """Return only the specs that the user selected during setup.
 
-        Queries the entity registry for all entities belonging to this config
-        entry and extracts the sensor address from the unique_id format:
-          {entry_id}_VA_0x{address:04x}
+        The selected sensor addresses are stored as a list of hex strings
+        (e.g. ["0x0000", "0x0001", ...]) in config_entry.data.
 
-        Only entities that are NOT disabled are included.  This allows the
-        coordinator to skip polling addresses the user has turned off,
-        significantly reducing serial traffic.
-
-        Returns None if the registry is not available (first startup).
+        If no selection is stored (e.g. migrating from an older version),
+        all discovered specs are returned as a fallback.
         """
-        try:
-            registry = er.async_get(self.hass)
-        except Exception:
-            return None
+        selected = self.config_entry.data.get(CONF_SELECTED_SENSORS)
 
-        entry_id = self.config_entry.entry_id
-        enabled_addresses: set[int] = set()
+        if not selected:
+            # No selection stored -- poll everything (backwards compat)
+            return self._specs
 
-        for entity in er.async_entries_for_config_entry(registry, entry_id):
-            # Skip disabled entities
-            if entity.disabled:
-                continue
+        # Convert hex strings to int addresses for fast lookup
+        selected_addrs = set()
+        for addr_str in selected:
+            try:
+                selected_addrs.add(int(addr_str, 16))
+            except ValueError:
+                pass
 
-            # Extract address from unique_id: "{entry_id}_{type}_0x{addr}"
-            uid = entity.unique_id or ""
-            if "_0x" in uid:
-                try:
-                    addr_hex = uid.rsplit("_0x", 1)[1]
-                    enabled_addresses.add(int(addr_hex, 16))
-                except (ValueError, IndexError):
-                    pass
-
-        return enabled_addresses if enabled_addresses else None
+        return [s for s in self._specs if s.address in selected_addrs]

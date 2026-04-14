@@ -9,6 +9,13 @@
           "port": "Port"
         }
       },
+      "sensors": {
+        "title": "Select Sensors",
+        "description": "The heater was contacted and reported the sensors below with their current values. Select the sensors you want to monitor. Unselected sensors will not be polled, reducing serial traffic.",
+        "data": {
+          "selected_sensors": "Sensors"
+        }
+      },
       "reconfigure": {
         "title": "Reconfigure Fröling Heater",
         "description": "Update the connection settings for your TCP-to-serial converter.",
@@ -20,6 +27,7 @@
     },
     "error": {
       "cannot_connect": "Failed to connect to the heater. Check host, port, and cable.",
+      "no_sensors": "Connected successfully but no sensors were found.",
       "unknown": "An unexpected error occurred."
     },
     "abort": {
@@ -31,9 +39,10 @@
     "step": {
       "init": {
         "title": "Fröling Heater Options",
-        "description": "Only enabled sensors are polled. Disable sensors you don't need to reduce serial traffic.",
+        "description": "Adjust polling interval and sensor selection. Sensor discovery requires a brief connection to the heater.",
         "data": {
-          "scan_interval": "Polling interval (seconds)"
+          "scan_interval": "Polling interval (seconds)",
+          "selected_sensors": "Sensors"
         }
       }
     }
