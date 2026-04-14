@@ -135,25 +135,50 @@ def _sensors_to_select_options(
     """Convert discovered sensors to HA SelectOptionDict for multi-select UI.
 
     Shows the sensor title, unit, and current value.
-    Example: "Kesseltemperatur = 65.3 °C" with value "0x0000"
+    Example: "Kesseltemperatur = 65.3 °C"
 
     Filters out:
     - Sensors that couldn't be read (connection error)
     - Temperature sensors reading exactly 0.0°C (no physical sensor connected)
-    """
-    options: list[SelectOptionDict] = []
-    for sensor in sensors:
-        if _is_likely_absent(sensor) and not include_absent:
-            continue
 
-        # Build a descriptive label showing the current value
+    Deduplication:
+    - Sensors with identical title AND identical value are reduced to one entry
+      (same physical sensor exposed at multiple addresses)
+    - Sensors with the same title but different values get an address suffix
+      to distinguish them (different heating circuits, etc.)
+    """
+    # Step 1: Filter out absent sensors
+    present = [s for s in sensors if not _is_likely_absent(s) or include_absent]
+
+    # Step 2: Detect duplicate titles
+    # Count how many times each (title, value_rounded) combination appears
+    from collections import Counter
+    title_counts = Counter(s.spec.title for s in present)
+    seen_title_value: dict[tuple[str, float | None], bool] = {}
+
+    options: list[SelectOptionDict] = []
+    for sensor in present:
+        title = sensor.spec.title
+        value = round(sensor.value, 1) if sensor.value is not None else None
+
+        # Skip exact duplicates (same title AND same value = same physical sensor)
+        key = (title, value)
+        if key in seen_title_value:
+            continue
+        seen_title_value[key] = True
+
+        # Build label with current value
         if sensor.readable and sensor.value is not None:
             if sensor.spec.unit:
-                label = f"{sensor.spec.title} = {sensor.value:.1f} {sensor.spec.unit}"
+                label = f"{title} = {sensor.value:.1f} {sensor.spec.unit}"
             else:
-                label = f"{sensor.spec.title} = {sensor.value:.1f}"
+                label = f"{title} = {sensor.value:.1f}"
         else:
-            label = f"{sensor.spec.title} (nicht verfügbar)"
+            label = f"{title} (nicht verfügbar)"
+
+        # Append address for remaining duplicates (same title, different values)
+        if title_counts[title] > 1:
+            label = f"{label}  [0x{sensor.spec.address:04X}]"
 
         options.append(
             SelectOptionDict(
