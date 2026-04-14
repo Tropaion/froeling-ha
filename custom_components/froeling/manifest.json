@@ -1,9 +1,9 @@
 {
   "domain": "froeling",
   "name": "Fröling Heater",
-  "codeowners": ["@FabianPlaimauer"],
+  "codeowners": ["@Tropaion"],
   "dependencies": [],
-  "documentation": "https://github.com/FabianPlaimauer/froeling-ha",
+  "documentation": "https://github.com/Tropaion/froeling-ha",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "requirements": [],
