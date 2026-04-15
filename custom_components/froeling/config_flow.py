@@ -69,46 +69,71 @@ class DiscoveredSensor:
 
 
 async def _discover_sensors(client: FroelingClient) -> list[DiscoveredSensor]:
-    """Discover all sensors and read their current values.
+    """Discover all sensors and attempt to read their current values.
 
-    Handles connection drops during value reading by reconnecting.
-    Sensors that still fail after reconnect are marked as not readable
-    but still included in the list (they might just be temporarily unavailable).
+    Phase 1: Enumerate all sensor specs from the heater (always works).
+    Phase 2: Read current values for each sensor (best-effort).
+
+    If value reading fails (connection drops, protocol desync), sensors
+    are still included in the result with value=None so the user can
+    still select them based on name and unit alone.
     """
+    # Phase 1: Discover sensor specs (this is reliable)
     specs = await client.discover_sensors()
-    discovered: list[DiscoveredSensor] = []
+    _LOGGER.debug("Discovered %d sensor specs, now reading values...", len(specs))
 
-    consecutive_failures = 0
+    # Phase 2: Read current values (best-effort)
+    # Disconnect and reconnect cleanly to flush any leftover protocol state
+    # from the discovery burst. The EE10 may also drop idle connections.
+    try:
+        await client.disconnect()
+        await client.connect()
+        # Send a CHECK command to verify the connection is alive and
+        # the protocol is in sync (this was present in v0.5.1 and missing
+        # in v0.6.0, which caused the "only one sensor" bug)
+        await client.check_connection()
+    except Exception as exc:
+        _LOGGER.warning("Could not reconnect for value reading: %s", exc)
+        # Return specs without values -- user can still select by name
+        return [
+            DiscoveredSensor(spec=s, value=None, readable=False) for s in specs
+        ]
+
+    discovered: list[DiscoveredSensor] = []
+    failure_count = 0
 
     for spec in specs:
         try:
-            # Reconnect if the connection dropped (EE10 may timeout between
-            # the discovery burst and the value reading phase)
-            if not client.is_connected:
-                _LOGGER.debug("Connection dropped during value reading, reconnecting...")
-                await client.connect()
-                consecutive_failures = 0
-
             sv = await client.get_value(spec.address, spec)
-            discovered.append(DiscoveredSensor(spec=spec, value=sv.value, readable=True))
-            consecutive_failures = 0
+            discovered.append(DiscoveredSensor(
+                spec=spec, value=sv.value, readable=True
+            ))
+            failure_count = 0  # Reset on success
 
         except Exception as exc:
-            consecutive_failures += 1
+            failure_count += 1
             _LOGGER.debug(
                 "Failed to read 0x%04X '%s': %s", spec.address, spec.title, exc
             )
-            discovered.append(DiscoveredSensor(spec=spec, value=None, readable=False))
+            discovered.append(DiscoveredSensor(
+                spec=spec, value=None, readable=False
+            ))
 
-            # If many consecutive failures, try reconnecting
-            if consecutive_failures >= 3:
-                try:
-                    await client.disconnect()
-                    await client.connect()
-                    consecutive_failures = 0
-                    _LOGGER.debug("Reconnected after %d consecutive failures", 3)
-                except Exception:
-                    pass  # Will retry on next iteration
+            # After 5 consecutive failures, the connection is likely dead.
+            # Stop trying to avoid wasting time on ~100 more timeouts.
+            if failure_count >= 5:
+                _LOGGER.warning(
+                    "Stopping value reads after %d consecutive failures. "
+                    "Remaining %d sensors shown without values.",
+                    failure_count, len(specs) - len(discovered),
+                )
+                # Add remaining specs without values
+                remaining_specs = specs[len(discovered):]
+                for s in remaining_specs:
+                    discovered.append(DiscoveredSensor(
+                        spec=s, value=None, readable=False
+                    ))
+                break
 
     return discovered
 
@@ -142,7 +167,9 @@ def _sensors_to_select_options(
         title = sensor.spec.title
         addr_hex = f"0x{sensor.spec.address:04X}"
 
-        # Format the value smartly
+        # Format the label: show value if available, otherwise just name + unit
+        unit = sensor.spec.unit.strip() if sensor.spec.unit else ""
+
         if sensor.readable and sensor.value is not None:
             # Use integer display when the value has no fractional part
             if sensor.value == int(sensor.value):
@@ -150,10 +177,12 @@ def _sensors_to_select_options(
             else:
                 val_str = f"{sensor.value:.1f}"
 
-            unit = sensor.spec.unit.strip() if sensor.spec.unit else ""
             label = f"{title} = {val_str} {unit}".rstrip() if unit else f"{title} = {val_str}"
+        elif unit:
+            # No value but we know the unit -- show name + unit
+            label = f"{title} ({unit})"
         else:
-            label = f"{title} (nicht verfügbar)"
+            label = title
 
         # Append address for duplicate titles
         if title_counts[title] > 1:
