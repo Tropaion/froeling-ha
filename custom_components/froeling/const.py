@@ -21,9 +21,9 @@ DOMAIN = "froeling"
 # Connection defaults
 # ---------------------------------------------------------------------------
 
-# No default host/port -- each user's setup is different.
+# No hardcoded defaults -- each user's setup is different.
 DEFAULT_HOST = ""
-DEFAULT_PORT = 8899
+DEFAULT_PORT = 0
 
 # Default polling interval in seconds.  The heater's COM1 serial link is
 # shared with the LCD display, so we don't poll too aggressively.

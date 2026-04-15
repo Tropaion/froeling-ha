@@ -175,8 +175,12 @@ class FroelingValueSensor(FroelingEntity, SensorEntity):
         if sv is None:
             return None
 
-        # Round to 2 decimal places to avoid floating-point noise in history.
-        return round(sv.value, 2)
+        # Return integer for whole numbers (e.g., "Anzahl Brennerstarts = 16497")
+        # and rounded float for fractional values (e.g., "Kesseltemperatur = 65.3")
+        rounded = round(sv.value, 2)
+        if rounded == int(rounded):
+            return int(rounded)
+        return rounded
 
 
 # ---------------------------------------------------------------------------

@@ -46,7 +46,6 @@ from .const import (
     CONN_TYPE_NETWORK,
     CONN_TYPE_SERIAL,
     DEFAULT_DEVICE_NAME,
-    DEFAULT_PORT,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
     MAX_SCAN_INTERVAL,
@@ -65,65 +64,108 @@ _LOGGER = logging.getLogger(__name__)
 class DiscoveredSensor:
     """A sensor discovered from the heater with its current value."""
     spec: ValueSpec
-    value: float | None
-    readable: bool
+    value: float | None  # Current reading, or None if read failed
+    readable: bool       # True if get_value succeeded
 
 
 async def _discover_sensors(client: FroelingClient) -> list[DiscoveredSensor]:
     """Discover all sensors and read their current values.
 
-    Returns a list of DiscoveredSensor with current readings.
-    Sensors that fail to read are marked as not readable.
+    Handles connection drops during value reading by reconnecting.
+    Sensors that still fail after reconnect are marked as not readable
+    but still included in the list (they might just be temporarily unavailable).
     """
     specs = await client.discover_sensors()
     discovered: list[DiscoveredSensor] = []
+
+    consecutive_failures = 0
+
     for spec in specs:
         try:
+            # Reconnect if the connection dropped (EE10 may timeout between
+            # the discovery burst and the value reading phase)
+            if not client.is_connected:
+                _LOGGER.debug("Connection dropped during value reading, reconnecting...")
+                await client.connect()
+                consecutive_failures = 0
+
             sv = await client.get_value(spec.address, spec)
             discovered.append(DiscoveredSensor(spec=spec, value=sv.value, readable=True))
-        except Exception:
+            consecutive_failures = 0
+
+        except Exception as exc:
+            consecutive_failures += 1
+            _LOGGER.debug(
+                "Failed to read 0x%04X '%s': %s", spec.address, spec.title, exc
+            )
             discovered.append(DiscoveredSensor(spec=spec, value=None, readable=False))
+
+            # If many consecutive failures, try reconnecting
+            if consecutive_failures >= 3:
+                try:
+                    await client.disconnect()
+                    await client.connect()
+                    consecutive_failures = 0
+                    _LOGGER.debug("Reconnected after %d consecutive failures", 3)
+                except Exception:
+                    pass  # Will retry on next iteration
+
     return discovered
 
 
-def _is_likely_absent(sensor: DiscoveredSensor) -> bool:
-    """Check if a sensor is likely not physically present.
-
-    Temperature sensors reading exactly 0.0°C almost always indicate
-    no physical sensor is connected to that address.
-    """
-    if not sensor.readable:
-        return True
-    if sensor.value is not None and sensor.value == 0.0 and sensor.spec.unit == "°C":
-        return True
-    return False
-
-
 def _sensors_to_select_options(
-    sensors: list[DiscoveredSensor], include_absent: bool = False
-) -> list[SelectOptionDict]:
+    sensors: list[DiscoveredSensor],
+) -> tuple[list[SelectOptionDict], list[str]]:
     """Convert discovered sensors to HA select options with live values.
 
-    Filters absent sensors. Appends address suffix for duplicate titles.
+    Returns a tuple of (all_options, preselected_values).
+
+    Filtering:
+    - Temperature sensors reading 0.0°C are included but NOT preselected
+      (likely no physical sensor, but user can still opt in)
+    - Unreadable sensors are included but NOT preselected
+
+    Preselection:
+    - Only sensors with a non-zero readable value are preselected
+
+    Formatting:
+    - Integer values shown without decimals (e.g., "16497" not "16497.0")
+    - Float values shown with 1 decimal (e.g., "65.3")
+    - Duplicate titles get an address suffix [0x0004]
     """
-    present = [s for s in sensors if not _is_likely_absent(s) or include_absent]
-    title_counts = Counter(s.spec.title for s in present)
+    title_counts = Counter(s.spec.title for s in sensors)
 
     options: list[SelectOptionDict] = []
-    for sensor in present:
+    preselected: list[str] = []
+
+    for sensor in sensors:
         title = sensor.spec.title
+        addr_hex = f"0x{sensor.spec.address:04X}"
+
+        # Format the value smartly
         if sensor.readable and sensor.value is not None:
-            label = f"{title} = {sensor.value:.1f} {sensor.spec.unit}".rstrip()
+            # Use integer display when the value has no fractional part
+            if sensor.value == int(sensor.value):
+                val_str = f"{int(sensor.value)}"
+            else:
+                val_str = f"{sensor.value:.1f}"
+
+            unit = sensor.spec.unit.strip() if sensor.spec.unit else ""
+            label = f"{title} = {val_str} {unit}".rstrip() if unit else f"{title} = {val_str}"
         else:
             label = f"{title} (nicht verfügbar)"
 
+        # Append address for duplicate titles
         if title_counts[title] > 1:
-            label = f"{label}  [0x{sensor.spec.address:04X}]"
+            label = f"{label}  [{addr_hex}]"
 
-        options.append(
-            SelectOptionDict(value=f"0x{sensor.spec.address:04X}", label=label)
-        )
-    return options
+        options.append(SelectOptionDict(value=addr_hex, label=label))
+
+        # Preselect only sensors with non-zero readable values
+        if sensor.readable and sensor.value is not None and sensor.value != 0.0:
+            preselected.append(addr_hex)
+
+    return options, preselected
 
 
 def _create_client(data: dict[str, Any]) -> FroelingClient:
@@ -148,7 +190,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         self._device_name: str = DEFAULT_DEVICE_NAME
         self._conn_type: str = CONN_TYPE_NETWORK
         self._host: str = ""
-        self._port: int = DEFAULT_PORT
+        self._port: int = 0
         self._serial_device: str = ""
         self._discovered: list[DiscoveredSensor] = []
 
@@ -205,7 +247,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         schema = vol.Schema({
             vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
             vol.Required(CONF_HOST): str,
-            vol.Required(CONF_PORT, default=DEFAULT_PORT): int,
+            vol.Required(CONF_PORT): int,
         })
 
         return self.async_show_form(
@@ -271,7 +313,6 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
-            # Build config entry data
             data: dict[str, Any] = {
                 CONF_DEVICE_NAME: self._device_name,
                 CONF_CONNECTION_TYPE: self._conn_type,
@@ -285,11 +326,11 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
 
             return self.async_create_entry(title=self._device_name, data=data)
 
-        options = _sensors_to_select_options(self._discovered)
-        all_values = [opt["value"] for opt in options]
+        # Build options and determine preselection
+        options, preselected = _sensors_to_select_options(self._discovered)
 
         schema = vol.Schema({
-            vol.Required(CONF_SELECTED_SENSORS, default=all_values): SelectSelector(
+            vol.Required(CONF_SELECTED_SENSORS, default=preselected): SelectSelector(
                 SelectSelectorConfig(
                     options=options, multiple=True, mode=SelectSelectorMode.LIST,
                 )
@@ -311,7 +352,6 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         conn_type = entry.data.get(CONF_CONNECTION_TYPE, CONN_TYPE_NETWORK)
 
         if user_input is not None:
-            # Test new connection
             client = _create_client(user_input | {CONF_CONNECTION_TYPE: conn_type})
             try:
                 await client.connect()
@@ -333,7 +373,6 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                     data=new_data,
                 )
 
-        # Show form matching current connection type
         if conn_type == CONN_TYPE_SERIAL:
             schema = vol.Schema({
                 vol.Required(CONF_SERIAL_DEVICE,
@@ -342,7 +381,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         else:
             schema = vol.Schema({
                 vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST, "")): str,
-                vol.Required(CONF_PORT, default=entry.data.get(CONF_PORT, DEFAULT_PORT)): int,
+                vol.Required(CONF_PORT, default=entry.data.get(CONF_PORT, 0)): int,
             })
 
         return self.async_show_form(
@@ -385,12 +424,14 @@ class FroelingOptionsFlow(OptionsFlow):
 
         # Try to discover sensors for re-selection
         sensor_options: list[SelectOptionDict] = []
+        preselected: list[str] = current_selected
         try:
             client = _create_client(self._config_entry.data)
             await client.connect()
             discovered = await _discover_sensors(client)
             await client.disconnect()
-            sensor_options = _sensors_to_select_options(discovered)
+            sensor_options, _ = _sensors_to_select_options(discovered)
+            # Keep current selection as preselection, not the auto-detected one
         except Exception:
             _LOGGER.warning("Options flow: could not discover sensors")
 
@@ -402,12 +443,8 @@ class FroelingOptionsFlow(OptionsFlow):
         }
 
         if sensor_options:
-            default_selected = (
-                current_selected if current_selected
-                else [opt["value"] for opt in sensor_options]
-            )
             schema_dict[vol.Required(
-                CONF_SELECTED_SENSORS, default=default_selected,
+                CONF_SELECTED_SENSORS, default=preselected,
             )] = SelectSelector(
                 SelectSelectorConfig(
                     options=sensor_options, multiple=True, mode=SelectSelectorMode.LIST,
