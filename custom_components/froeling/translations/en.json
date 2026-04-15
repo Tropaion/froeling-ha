@@ -11,7 +11,7 @@
       },
       "network": {
         "title": "Network Connection",
-        "description": "Enter the IP address and port of your TCP-to-serial converter connected to the heater's COM1 port.",
+        "description": "Enter your connection details. After submitting, the integration will scan for sensors (this takes about 60 seconds).",
         "data": {
           "device_name": "Device Name",
           "host": "Host (IP address or hostname)",
@@ -20,46 +20,29 @@
       },
       "serial": {
         "title": "USB Serial Connection",
-        "description": "Enter the serial device path of the USB-to-RS232 adapter connected to the heater's COM1 port.",
+        "description": "Enter your connection details. After submitting, the integration will scan for sensors (this takes about 60 seconds).",
         "data": {
           "device_name": "Device Name",
           "serial_device": "Serial Device (e.g., /dev/ttyUSB0 or COM3)"
         }
       },
-      "discover_sensors": {
-        "title": "Scanning for Sensors",
-        "description": "{info}"
-      },
       "sensors": {
         "title": "Select Sensors",
-        "description": "The heater was contacted and reported the sensors below with their current values. Select the sensors you want to monitor.",
+        "description": "The heater reported the sensors below with their current values. Select which ones you want to monitor.",
         "data": {
           "selected_sensors": "Sensors"
         }
       },
       "access_mode": {
         "title": "Access Mode",
-        "description": "Choose how the integration interacts with your heater.",
-        "menu_options": {
-          "read_only": "Read-only (recommended)",
-          "read_write": "Read/Write — allows changing heater parameters"
+        "description": "Enable write mode to control heater parameters from Home Assistant. WARNING: Incorrect values could affect heater operation. Only enable if you understand the risks. If enabled, the integration will scan for writable parameters (this takes about 30 seconds).",
+        "data": {
+          "write_enabled": "Enable write mode"
         }
-      },
-      "read_write": {
-        "title": "Write Mode Warning",
-        "description": "Write mode allows changing heater parameters from Home Assistant. Incorrect values could affect heater operation. Only enable if you understand the risks.",
-        "menu_options": {
-          "confirm_write": "Yes, enable write mode",
-          "back_to_read_only": "No, use read-only mode"
-        }
-      },
-      "discover_parameters": {
-        "title": "Scanning for Parameters",
-        "description": "{info}"
       },
       "parameters": {
         "title": "Select Parameters",
-        "description": "The following writable parameters were found on your heater. Select which ones you want to control from Home Assistant. For safety, none are selected by default.",
+        "description": "The following writable parameters were found. Select which ones you want to control. For safety, none are selected by default.",
         "data": {
           "selected_parameters": "Writable Parameters"
         }
@@ -74,10 +57,6 @@
         }
       }
     },
-    "progress": {
-      "discovering_sensors": "Searching for sensors on your heater. This may take up to 60 seconds...",
-      "discovering_parameters": "Searching for writable parameters. This may take a moment..."
-    },
     "error": {
       "cannot_connect": "Failed to connect to the heater. Check your connection settings and cables.",
       "no_sensors": "Connected successfully but no sensors were found.",
@@ -85,8 +64,7 @@
     },
     "abort": {
       "already_configured": "This heater is already configured.",
-      "reconfigure_successful": "Connection updated successfully.",
-      "discover_failed": "Sensor discovery failed. Check the connection and try again."
+      "reconfigure_successful": "Connection updated successfully."
     }
   },
   "options": {

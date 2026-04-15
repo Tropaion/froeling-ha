@@ -11,7 +11,7 @@
       },
       "network": {
         "title": "Netzwerkverbindung",
-        "description": "Geben Sie die IP-Adresse und den Port Ihres TCP-zu-Seriell Konverters ein, der mit dem COM1-Anschluss der Heizung verbunden ist.",
+        "description": "Geben Sie Ihre Verbindungsdaten ein. Nach dem Absenden sucht die Integration nach Sensoren (dauert ca. 60 Sekunden).",
         "data": {
           "device_name": "Gerätename",
           "host": "Host (IP-Adresse oder Hostname)",
@@ -20,46 +20,29 @@
       },
       "serial": {
         "title": "USB Serielle Verbindung",
-        "description": "Geben Sie den Gerätepfad des USB-zu-RS232 Adapters ein, der mit dem COM1-Anschluss der Heizung verbunden ist.",
+        "description": "Geben Sie Ihre Verbindungsdaten ein. Nach dem Absenden sucht die Integration nach Sensoren (dauert ca. 60 Sekunden).",
         "data": {
           "device_name": "Gerätename",
           "serial_device": "Serielles Gerät (z.B. /dev/ttyUSB0 oder COM3)"
         }
       },
-      "discover_sensors": {
-        "title": "Suche nach Sensoren",
-        "description": "{info}"
-      },
       "sensors": {
         "title": "Sensoren auswählen",
-        "description": "Die Heizung wurde kontaktiert und hat die folgenden Sensoren mit ihren aktuellen Werten gemeldet. Wählen Sie die Sensoren aus, die Sie überwachen möchten.",
+        "description": "Die Heizung hat die folgenden Sensoren mit ihren aktuellen Werten gemeldet. Wählen Sie aus, welche Sie überwachen möchten.",
         "data": {
           "selected_sensors": "Sensoren"
         }
       },
       "access_mode": {
         "title": "Zugriffsmodus",
-        "description": "Wählen Sie, wie die Integration mit Ihrer Heizung interagiert.",
-        "menu_options": {
-          "read_only": "Nur Lesen (empfohlen)",
-          "read_write": "Lesen/Schreiben — erlaubt Änderungen an Heizungsparametern"
+        "description": "Aktivieren Sie den Schreibmodus, um Heizungsparameter über Home Assistant zu steuern. WARNUNG: Falsche Werte können den Betrieb der Heizung beeinträchtigen. Nur aktivieren, wenn Sie die Risiken verstehen. Bei Aktivierung werden schreibbare Parameter gesucht (dauert ca. 30 Sekunden).",
+        "data": {
+          "write_enabled": "Schreibmodus aktivieren"
         }
-      },
-      "read_write": {
-        "title": "Warnung: Schreibmodus",
-        "description": "Der Schreibmodus erlaubt das Ändern von Heizungsparametern über Home Assistant. Falsche Werte können den Betrieb der Heizung beeinträchtigen. Nur aktivieren, wenn Sie die Risiken verstehen.",
-        "menu_options": {
-          "confirm_write": "Ja, Schreibmodus aktivieren",
-          "back_to_read_only": "Nein, nur Lesen verwenden"
-        }
-      },
-      "discover_parameters": {
-        "title": "Suche nach Parametern",
-        "description": "{info}"
       },
       "parameters": {
         "title": "Parameter auswählen",
-        "description": "Die folgenden schreibbaren Parameter wurden auf Ihrer Heizung gefunden. Wählen Sie aus, welche Sie über Home Assistant steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
+        "description": "Die folgenden schreibbaren Parameter wurden gefunden. Wählen Sie aus, welche Sie steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
         "data": {
           "selected_parameters": "Schreibbare Parameter"
         }
@@ -74,10 +57,6 @@
         }
       }
     },
-    "progress": {
-      "discovering_sensors": "Suche nach Sensoren auf Ihrer Heizung. Dies kann bis zu 60 Sekunden dauern...",
-      "discovering_parameters": "Suche nach schreibbaren Parametern. Dies kann einen Moment dauern..."
-    },
     "error": {
       "cannot_connect": "Verbindung zur Heizung fehlgeschlagen. Überprüfen Sie Ihre Verbindungseinstellungen und Kabel.",
       "no_sensors": "Verbindung erfolgreich, aber es wurden keine Sensoren gefunden.",
@@ -85,8 +64,7 @@
     },
     "abort": {
       "already_configured": "Diese Heizung ist bereits konfiguriert.",
-      "reconfigure_successful": "Verbindung erfolgreich aktualisiert.",
-      "discover_failed": "Sensorsuche fehlgeschlagen. Überprüfen Sie die Verbindung und versuchen Sie es erneut."
+      "reconfigure_successful": "Verbindung erfolgreich aktualisiert."
     }
   },
   "options": {
