@@ -397,41 +397,39 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_parameters(self, user_input=None) -> ConfigFlowResult:
         if user_input is not None:
-            # Check if "show expert" was toggled -- if so, re-show with all params
-            show_expert = user_input.get("show_expert", False)
-            if show_expert and not getattr(self, '_showing_expert', False):
-                self._showing_expert = True
-                return await self.async_step_parameters()
+            # Combine selections from both lists
+            basic_selected = user_input.get(CONF_SELECTED_PARAMETERS, [])
+            expert_selected = user_input.get("selected_expert_parameters", [])
+            all_selected = basic_selected + expert_selected
+            return await self._create_config_entry(selected_parameters=all_selected)
 
-            selected = user_input.get(CONF_SELECTED_PARAMETERS, [])
-            return await self._create_config_entry(selected_parameters=selected)
+        # Split parameters into basic and expert
+        basic_params = [p for p in self._writable_params if not _is_expert_param(p)]
+        expert_params = [p for p in self._writable_params if _is_expert_param(p)]
 
-        # Filter parameters: show only basic by default, all if expert toggled
-        showing_expert = getattr(self, '_showing_expert', False)
-        if showing_expert:
-            visible_params = self._writable_params
-        else:
-            visible_params = [p for p in self._writable_params if not _is_expert_param(p)]
+        basic_options = _params_to_select_options(basic_params)
+        expert_options = _params_to_select_options(expert_params)
 
-        basic_count = len([p for p in self._writable_params if not _is_expert_param(p)])
-        expert_count = len(self._writable_params) - basic_count
+        schema_dict: dict = {}
 
-        options = _params_to_select_options(visible_params)
-        schema_dict: dict = {
-            vol.Required(CONF_SELECTED_PARAMETERS, default=[]): SelectSelector(
-                SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
-            ),
-        }
-        # Only show the "show expert" toggle when expert params are hidden
-        if not showing_expert and expert_count > 0:
-            schema_dict[vol.Optional("show_expert", default=False)] = bool
+        # Basic parameters list (always shown)
+        if basic_options:
+            schema_dict[vol.Required(CONF_SELECTED_PARAMETERS, default=[])] = SelectSelector(
+                SelectSelectorConfig(options=basic_options, multiple=True, mode=SelectSelectorMode.LIST)
+            )
+
+        # Expert parameters list (shown below basic)
+        if expert_options:
+            schema_dict[vol.Optional("selected_expert_parameters", default=[])] = SelectSelector(
+                SelectSelectorConfig(options=expert_options, multiple=True, mode=SelectSelectorMode.LIST)
+            )
 
         return self.async_show_form(
             step_id="parameters",
             data_schema=vol.Schema(schema_dict),
             description_placeholders={
-                "count": str(len(visible_params)),
-                "hidden": str(expert_count) if not showing_expert else "0",
+                "count": str(len(basic_params)),
+                "hidden": str(len(expert_params)),
             },
         )
 

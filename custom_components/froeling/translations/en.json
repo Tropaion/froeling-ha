@@ -48,10 +48,10 @@
       },
       "parameters": {
         "title": "Select Parameters",
-        "description": "Found {count} parameters. {hidden} expert parameters are hidden. Select which ones you want to control. For safety, none are selected by default.",
+        "description": "Found {count} basic and {hidden} expert parameters. Select which ones you want to control. For safety, none are selected by default.",
         "data": {
-          "selected_parameters": "Writable Parameters",
-          "show_expert": "Show expert/internal parameters"
+          "selected_parameters": "Basic Parameters",
+          "selected_expert_parameters": "Expert Parameters (internal settings — change with caution)"
         }
       },
       "reconfigure": {
