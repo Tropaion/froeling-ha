@@ -48,17 +48,10 @@
       },
       "parameters": {
         "title": "Select Parameters",
-        "description": "Found {count} basic parameters ({hidden} expert parameters available in the next step). For safety, none are selected by default.",
+        "description": "Found {count} basic parameters ({hidden} expert parameters available). For safety, none are selected by default.",
         "data": {
-          "selected_parameters": "Basic Parameters"
-        }
-      },
-      "expert_choice": {
-        "title": "Expert Parameters",
-        "description": "Do you want to configure expert/internal parameters? These are advanced heater settings that should only be changed if you know what you are doing.",
-        "menu_options": {
-          "finish_setup": "Finish setup (skip expert parameters)",
-          "show_expert": "Configure expert parameters"
+          "selected_parameters": "Basic Parameters",
+          "show_expert": "I also want to configure expert parameters"
         }
       },
       "show_expert": {
