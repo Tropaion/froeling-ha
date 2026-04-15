@@ -275,6 +275,9 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                 step_id="discover_sensors",
                 progress_action="discovering_sensors",
                 progress_task=self._sensor_discover_task,
+                description_placeholders={
+                    "info": "Connecting to the heater and reading all available sensors. This may take up to 60 seconds..."
+                },
             )
 
         # Task completed - check result
@@ -335,9 +338,15 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         return await self._create_config_entry()
 
     async def async_step_read_write(self, user_input=None) -> ConfigFlowResult:
-        """Read/write selected: show warning, then scan for parameters."""
+        """Read/write selected: show warning, then scan for parameters.
+
+        NOTE: async_show_menu requires that step_id matches an
+        async_step_<step_id> method. We reuse 'read_write' as the step_id
+        so this method handles both the initial call and the menu display.
+        The menu_options map to async_step_confirm_write / async_step_back_to_read_only.
+        """
         return self.async_show_menu(
-            step_id="read_write_warning",
+            step_id="read_write",
             menu_options=["confirm_write", "back_to_read_only"],
         )
 
@@ -385,6 +394,9 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                 step_id="discover_parameters",
                 progress_action="discovering_parameters",
                 progress_task=self._param_discover_task,
+                description_placeholders={
+                    "info": "Reading the heater's menu tree to find writable parameters..."
+                },
             )
 
         try:

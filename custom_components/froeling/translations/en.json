@@ -28,7 +28,7 @@
       },
       "discover_sensors": {
         "title": "Scanning for Sensors",
-        "description": "Connecting to the heater and reading all available sensors with their current values. This may take up to 60 seconds..."
+        "description": "{info}"
       },
       "sensors": {
         "title": "Select Sensors",
@@ -45,7 +45,7 @@
           "read_write": "Read/Write — allows changing heater parameters"
         }
       },
-      "read_write_warning": {
+      "read_write": {
         "title": "Write Mode Warning",
         "description": "Write mode allows changing heater parameters from Home Assistant. Incorrect values could affect heater operation. Only enable if you understand the risks.",
         "menu_options": {
@@ -55,7 +55,7 @@
       },
       "discover_parameters": {
         "title": "Scanning for Parameters",
-        "description": "Reading the heater's menu tree to find writable parameters. This may take a moment..."
+        "description": "{info}"
       },
       "parameters": {
         "title": "Select Parameters",

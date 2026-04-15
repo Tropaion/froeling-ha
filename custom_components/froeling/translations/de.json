@@ -28,7 +28,7 @@
       },
       "discover_sensors": {
         "title": "Suche nach Sensoren",
-        "description": "Verbindung zur Heizung wird hergestellt und alle verfügbaren Sensoren mit ihren aktuellen Werten werden ausgelesen. Dies kann bis zu 60 Sekunden dauern..."
+        "description": "{info}"
       },
       "sensors": {
         "title": "Sensoren auswählen",
@@ -45,7 +45,7 @@
           "read_write": "Lesen/Schreiben — erlaubt Änderungen an Heizungsparametern"
         }
       },
-      "read_write_warning": {
+      "read_write": {
         "title": "Warnung: Schreibmodus",
         "description": "Der Schreibmodus erlaubt das Ändern von Heizungsparametern über Home Assistant. Falsche Werte können den Betrieb der Heizung beeinträchtigen. Nur aktivieren, wenn Sie die Risiken verstehen.",
         "menu_options": {
@@ -55,7 +55,7 @@
       },
       "discover_parameters": {
         "title": "Suche nach Parametern",
-        "description": "Die Menüstruktur der Heizung wird ausgelesen, um schreibbare Parameter zu finden. Dies kann einen Moment dauern..."
+        "description": "{info}"
       },
       "parameters": {
         "title": "Parameter auswählen",
