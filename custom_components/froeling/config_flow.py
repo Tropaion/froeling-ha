@@ -1,14 +1,18 @@
 """Config flow for the Fröling Heater integration.
 
 Setup flow:
-  1. Connection type menu (Network / USB Serial)
-  2. Connection details form (host+port or serial device + device name)
-  3. Sensor discovery (blocking, with form submission spinner)
-  4. Sensor selection form
-  5. Access mode form (read-only checkbox, warning text)
-  6. If write: parameter discovery (blocking)
-  7. Parameter selection form
-  8. Config entry created
+  1. async_step_user          -> menu: network / serial
+  2. async_step_network       -> form: host, port, name
+  3. async_step_discover_sensors -> progress spinner + background task
+  4. async_step_sensors       -> form: select sensors
+  5. async_step_access_mode   -> form: write mode checkbox
+  6. async_step_discover_params -> progress spinner + background task (if write)
+  7. async_step_parameters    -> form: select parameters
+  8. entry created
+
+IMPORTANT: Every async_show_progress(step_id=X) requires a method
+async_step_X. Every async_show_progress_done(next_step_id=Y) requires
+a method async_step_Y.
 """
 
 from __future__ import annotations
@@ -64,25 +68,18 @@ _LOGGER = logging.getLogger(__name__)
 
 @dataclass
 class DiscoveredSensor:
-    """A sensor discovered from the heater with its current value."""
     spec: ValueSpec
     value: float | None
     readable: bool
 
 
 async def _validate_and_discover(client: FroelingClient) -> list[DiscoveredSensor]:
-    """Discover sensors and read values on a single connection.
-
-    Client must already be connected. Uses the proven v0.5.1 approach:
-    check -> discover -> read values, all on the same connection.
-    """
+    """Single-connection sensor discovery (proven v0.5.1 approach)."""
     ok = await client.check_connection()
     if not ok:
         raise FroelingConnectionError("Heater did not respond to CHECK command")
 
     specs = await client.discover_sensors()
-    _LOGGER.debug("Discovered %d sensor specs, reading values...", len(specs))
-
     discovered: list[DiscoveredSensor] = []
     failure_count = 0
 
@@ -93,21 +90,15 @@ async def _validate_and_discover(client: FroelingClient) -> list[DiscoveredSenso
             failure_count = 0
         except Exception as exc:
             failure_count += 1
-            _LOGGER.debug("Failed to read 0x%04X '%s': %s", spec.address, spec.title, exc)
             discovered.append(DiscoveredSensor(spec=spec, value=None, readable=False))
             if failure_count >= 5:
                 raise FroelingConnectionError(
-                    f"Connection lost after reading {len(discovered)} of "
-                    f"{len(specs)} sensors. Error: {exc}"
+                    f"Connection lost after reading {len(discovered)} of {len(specs)} sensors: {exc}"
                 )
-
     return discovered
 
 
-def _sensors_to_select_options(
-    sensors: list[DiscoveredSensor],
-) -> tuple[list[SelectOptionDict], list[str]]:
-    """Convert sensors to select options. Returns (options, preselected)."""
+def _sensors_to_select_options(sensors: list[DiscoveredSensor]) -> tuple[list[SelectOptionDict], list[str]]:
     title_counts = Counter(s.spec.title for s in sensors)
     options: list[SelectOptionDict] = []
     preselected: list[str] = []
@@ -118,10 +109,7 @@ def _sensors_to_select_options(
         unit = sensor.spec.unit.strip() if sensor.spec.unit else ""
 
         if sensor.readable and sensor.value is not None:
-            if sensor.value == int(sensor.value):
-                val_str = f"{int(sensor.value)}"
-            else:
-                val_str = f"{sensor.value:.1f}"
+            val_str = str(int(sensor.value)) if sensor.value == int(sensor.value) else f"{sensor.value:.1f}"
             label = f"{title} = {val_str} {unit}".rstrip() if unit else f"{title} = {val_str}"
         elif unit:
             label = f"{title} ({unit})"
@@ -139,7 +127,6 @@ def _sensors_to_select_options(
 
 
 def _params_to_select_options(params: list[WritableParameter]) -> list[SelectOptionDict]:
-    """Convert writable parameters to select options."""
     options: list[SelectOptionDict] = []
     for param in params:
         addr_hex = f"0x{param.address:04X}"
@@ -156,7 +143,6 @@ def _params_to_select_options(params: list[WritableParameter]) -> list[SelectOpt
 
 
 def _create_client_from_data(data: dict[str, Any]) -> FroelingClient:
-    """Create a FroelingClient from config data."""
     conn_type = data.get(CONF_CONNECTION_TYPE, CONN_TYPE_NETWORK)
     if conn_type == CONN_TYPE_SERIAL:
         return FroelingClient(serial_device=data[CONF_SERIAL_DEVICE])
@@ -168,8 +154,6 @@ def _create_client_from_data(data: dict[str, Any]) -> FroelingClient:
 # ---------------------------------------------------------------------------
 
 class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Multi-step config flow for Fröling heater setup."""
-
     VERSION = 1
 
     def __init__(self) -> None:
@@ -182,6 +166,8 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         self._write_enabled: bool = False
         self._writable_params: list[WritableParameter] = []
         self._selected_sensors: list[str] = []
+        # Background tasks for progress steps
+        self._task: asyncio.Task | None = None
 
     @staticmethod
     @callback
@@ -194,93 +180,98 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         return FroelingClient(host=self._host, port=self._port)
 
     # ------------------------------------------------------------------
-    # Step 1: Connection type
+    # Step 1: Connection type menu
     # ------------------------------------------------------------------
 
     async def async_step_user(self, user_input=None) -> ConfigFlowResult:
-        return self.async_show_menu(
-            step_id="user",
-            menu_options=["network", "serial"],
-        )
+        return self.async_show_menu(step_id="user", menu_options=["network", "serial"])
 
     # ------------------------------------------------------------------
-    # Step 2a: Network connection
+    # Step 2a: Network form
     # ------------------------------------------------------------------
 
     async def async_step_network(self, user_input=None) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
-
         if user_input is not None:
             self._conn_type = CONN_TYPE_NETWORK
             self._device_name = user_input[CONF_DEVICE_NAME]
             self._host = user_input[CONF_HOST]
             self._port = user_input[CONF_PORT]
-
-            # Sensor discovery happens here (blocking -- HA shows the
-            # form submission spinner automatically while this runs)
-            client = self._make_client()
-            try:
-                await client.connect()
-                self._discovered = await _validate_and_discover(client)
-            except FroelingConnectionError as exc:
-                _LOGGER.error("Connection error: %s", exc)
-                errors["base"] = "cannot_connect"
-            except Exception as exc:
-                _LOGGER.exception("Unexpected error")
-                errors["base"] = "unknown"
-            else:
-                if not self._discovered:
-                    errors["base"] = "no_sensors"
-                else:
-                    return await self.async_step_sensors()
-            finally:
-                await client.disconnect()
+            # Go to sensor discovery progress step
+            return await self.async_step_discover_sensors()
 
         schema = vol.Schema({
-            vol.Required(CONF_DEVICE_NAME, default=self._device_name or DEFAULT_DEVICE_NAME): str,
-            vol.Required(CONF_HOST, default=self._host or vol.UNDEFINED): str,
-            vol.Required(CONF_PORT, default=self._port or vol.UNDEFINED): int,
+            vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
+            vol.Required(CONF_HOST): str,
+            vol.Required(CONF_PORT): int,
         })
-        return self.async_show_form(step_id="network", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="network", data_schema=schema)
 
     # ------------------------------------------------------------------
-    # Step 2b: USB Serial connection
+    # Step 2b: Serial form
     # ------------------------------------------------------------------
 
     async def async_step_serial(self, user_input=None) -> ConfigFlowResult:
-        errors: dict[str, str] = {}
-
         if user_input is not None:
             self._conn_type = CONN_TYPE_SERIAL
             self._device_name = user_input[CONF_DEVICE_NAME]
             self._serial_device = user_input[CONF_SERIAL_DEVICE]
-
-            client = self._make_client()
-            try:
-                await client.connect()
-                self._discovered = await _validate_and_discover(client)
-            except FroelingConnectionError as exc:
-                _LOGGER.error("Connection error: %s", exc)
-                errors["base"] = "cannot_connect"
-            except Exception as exc:
-                _LOGGER.exception("Unexpected error")
-                errors["base"] = "unknown"
-            else:
-                if not self._discovered:
-                    errors["base"] = "no_sensors"
-                else:
-                    return await self.async_step_sensors()
-            finally:
-                await client.disconnect()
+            return await self.async_step_discover_sensors()
 
         schema = vol.Schema({
-            vol.Required(CONF_DEVICE_NAME, default=self._device_name or DEFAULT_DEVICE_NAME): str,
-            vol.Required(CONF_SERIAL_DEVICE, default=self._serial_device or vol.UNDEFINED): str,
+            vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
+            vol.Required(CONF_SERIAL_DEVICE): str,
         })
-        return self.async_show_form(step_id="serial", data_schema=schema, errors=errors)
+        return self.async_show_form(step_id="serial", data_schema=schema)
 
     # ------------------------------------------------------------------
-    # Step 3: Sensor selection
+    # Step 3: Sensor discovery with progress spinner
+    # Method name = async_step_discover_sensors -> step_id = "discover_sensors"
+    # ------------------------------------------------------------------
+
+    async def _do_sensor_discovery(self) -> None:
+        """Background task for sensor discovery."""
+        client = self._make_client()
+        try:
+            await client.connect()
+            self._discovered = await _validate_and_discover(client)
+        finally:
+            await client.disconnect()
+
+    async def async_step_discover_sensors(self, user_input=None) -> ConfigFlowResult:
+        """Show progress spinner while discovering sensors."""
+        # Start background task on first call
+        if self._task is None:
+            self._task = self.hass.async_create_task(self._do_sensor_discovery())
+
+        # If task is still running, show the progress spinner
+        if not self._task.done():
+            return self.async_show_progress(
+                step_id="discover_sensors",
+                progress_action="discover_sensors",
+                progress_task=self._task,
+            )
+
+        # Task finished -- check result
+        try:
+            await self._task
+        except Exception as exc:
+            _LOGGER.error("Sensor discovery failed: %s", exc)
+            self._task = None
+            return self.async_show_progress_done(next_step_id="discover_sensors_failed")
+
+        self._task = None
+
+        if not self._discovered:
+            return self.async_show_progress_done(next_step_id="discover_sensors_failed")
+
+        return self.async_show_progress_done(next_step_id="sensors")
+
+    async def async_step_discover_sensors_failed(self, user_input=None) -> ConfigFlowResult:
+        """Discovery failed -- abort with message."""
+        return self.async_abort(reason="discover_failed")
+
+    # ------------------------------------------------------------------
+    # Step 4: Sensor selection
     # ------------------------------------------------------------------
 
     async def async_step_sensors(self, user_input=None) -> ConfigFlowResult:
@@ -297,33 +288,14 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="sensors", data_schema=schema)
 
     # ------------------------------------------------------------------
-    # Step 4: Access mode (form with checkbox, not menu)
+    # Step 5: Access mode (checkbox form)
     # ------------------------------------------------------------------
 
     async def async_step_access_mode(self, user_input=None) -> ConfigFlowResult:
-        """Ask if the user wants write mode. Simple form with a checkbox."""
         if user_input is not None:
             self._write_enabled = user_input.get(CONF_WRITE_ENABLED, False)
-
             if self._write_enabled:
-                # Discover writable parameters (blocking)
-                client = self._make_client()
-                try:
-                    await client.connect()
-                    await client.check_connection()
-                    menu_items = await client.discover_menu()
-                    self._writable_params = await client.get_writable_parameters(menu_items)
-                except Exception as exc:
-                    _LOGGER.error("Parameter discovery failed: %s", exc)
-                    self._write_enabled = False
-                    self._writable_params = []
-                finally:
-                    await client.disconnect()
-
-                if self._writable_params:
-                    return await self.async_step_parameters()
-
-            # Read-only mode or no writable params found
+                return await self.async_step_discover_params()
             return await self._create_config_entry()
 
         schema = vol.Schema({
@@ -332,7 +304,57 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(step_id="access_mode", data_schema=schema)
 
     # ------------------------------------------------------------------
-    # Step 5: Parameter selection (only if write mode)
+    # Step 6: Parameter discovery with progress spinner
+    # Method name = async_step_discover_params -> step_id = "discover_params"
+    # ------------------------------------------------------------------
+
+    async def _do_param_discovery(self) -> None:
+        """Background task for parameter discovery."""
+        await asyncio.sleep(1.0)  # Let EE10 recover from sensor discovery
+        client = self._make_client()
+        try:
+            await client.connect()
+            await client.check_connection()
+            menu_items = await client.discover_menu()
+            self._writable_params = await client.get_writable_parameters(menu_items)
+        finally:
+            await client.disconnect()
+
+    async def async_step_discover_params(self, user_input=None) -> ConfigFlowResult:
+        """Show progress spinner while discovering parameters."""
+        if self._task is None:
+            self._task = self.hass.async_create_task(self._do_param_discovery())
+
+        if not self._task.done():
+            return self.async_show_progress(
+                step_id="discover_params",
+                progress_action="discover_params",
+                progress_task=self._task,
+            )
+
+        try:
+            await self._task
+        except Exception as exc:
+            _LOGGER.error("Parameter discovery failed: %s", exc)
+            self._task = None
+            self._write_enabled = False
+            return self.async_show_progress_done(next_step_id="discover_params_done")
+
+        self._task = None
+
+        if not self._writable_params:
+            self._write_enabled = False
+
+        return self.async_show_progress_done(next_step_id="discover_params_done")
+
+    async def async_step_discover_params_done(self, user_input=None) -> ConfigFlowResult:
+        """Route after parameter discovery completes."""
+        if self._writable_params:
+            return await self.async_step_parameters()
+        return await self._create_config_entry()
+
+    # ------------------------------------------------------------------
+    # Step 7: Parameter selection
     # ------------------------------------------------------------------
 
     async def async_step_parameters(self, user_input=None) -> ConfigFlowResult:
@@ -395,21 +417,13 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 new_data = dict(entry.data)
                 new_data.update(user_input)
-                uid = (
-                    f"serial:{user_input.get(CONF_SERIAL_DEVICE, '')}"
-                    if conn_type == CONN_TYPE_SERIAL
-                    else f"{user_input.get(CONF_HOST, '')}:{user_input.get(CONF_PORT, '')}"
-                )
+                uid = (f"serial:{user_input.get(CONF_SERIAL_DEVICE, '')}" if conn_type == CONN_TYPE_SERIAL
+                       else f"{user_input.get(CONF_HOST, '')}:{user_input.get(CONF_PORT, '')}")
                 return self.async_update_reload_and_abort(
-                    entry, unique_id=uid,
-                    title=new_data.get(CONF_DEVICE_NAME, entry.title),
-                    data=new_data,
-                )
+                    entry, unique_id=uid, title=new_data.get(CONF_DEVICE_NAME, entry.title), data=new_data)
 
         if conn_type == CONN_TYPE_SERIAL:
-            schema = vol.Schema({
-                vol.Required(CONF_SERIAL_DEVICE, default=entry.data.get(CONF_SERIAL_DEVICE, "")): str,
-            })
+            schema = vol.Schema({vol.Required(CONF_SERIAL_DEVICE, default=entry.data.get(CONF_SERIAL_DEVICE, "")): str})
         else:
             schema = vol.Schema({
                 vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST, "")): str,
@@ -461,15 +475,12 @@ class FroelingOptionsFlow(OptionsFlow):
 
         schema_dict: dict[vol.Marker, Any] = {
             vol.Required(CONF_SCAN_INTERVAL, default=current_interval): vol.All(
-                vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL),
-            ),
+                vol.Coerce(int), vol.Range(min=MIN_SCAN_INTERVAL, max=MAX_SCAN_INTERVAL)),
         }
         if sensor_options:
             schema_dict[vol.Required(CONF_SELECTED_SENSORS, default=current_sensors)] = SelectSelector(
-                SelectSelectorConfig(options=sensor_options, multiple=True, mode=SelectSelectorMode.LIST)
-            )
+                SelectSelectorConfig(options=sensor_options, multiple=True, mode=SelectSelectorMode.LIST))
         if param_options:
             schema_dict[vol.Required(CONF_SELECTED_PARAMETERS, default=current_params)] = SelectSelector(
-                SelectSelectorConfig(options=param_options, multiple=True, mode=SelectSelectorMode.LIST)
-            )
+                SelectSelectorConfig(options=param_options, multiple=True, mode=SelectSelectorMode.LIST))
         return self.async_show_form(step_id="init", data_schema=vol.Schema(schema_dict))

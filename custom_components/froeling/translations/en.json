@@ -11,7 +11,7 @@
       },
       "network": {
         "title": "Network Connection",
-        "description": "Enter your connection details. After submitting, the integration will scan for sensors (this takes about 60 seconds).",
+        "description": "Enter your connection details.",
         "data": {
           "device_name": "Device Name",
           "host": "Host (IP address or hostname)",
@@ -20,29 +20,35 @@
       },
       "serial": {
         "title": "USB Serial Connection",
-        "description": "Enter your connection details. After submitting, the integration will scan for sensors (this takes about 60 seconds).",
+        "description": "Enter your connection details.",
         "data": {
           "device_name": "Device Name",
           "serial_device": "Serial Device (e.g., /dev/ttyUSB0 or COM3)"
         }
       },
+      "discover_sensors": {
+        "title": "Scanning for Sensors"
+      },
       "sensors": {
         "title": "Select Sensors",
-        "description": "The heater reported the sensors below with their current values. Select which ones you want to monitor.",
+        "description": "Select the sensors you want to monitor.",
         "data": {
           "selected_sensors": "Sensors"
         }
       },
       "access_mode": {
         "title": "Access Mode",
-        "description": "Enable write mode to control heater parameters from Home Assistant. WARNING: Incorrect values could affect heater operation. Only enable if you understand the risks. If enabled, the integration will scan for writable parameters (this takes about 30 seconds).",
+        "description": "Enable write mode to control heater parameters from Home Assistant. WARNING: Incorrect values could affect heater operation. Only enable if you understand the risks.",
         "data": {
           "write_enabled": "Enable write mode"
         }
       },
+      "discover_params": {
+        "title": "Scanning for Parameters"
+      },
       "parameters": {
         "title": "Select Parameters",
-        "description": "The following writable parameters were found. Select which ones you want to control. For safety, none are selected by default.",
+        "description": "Select which parameters you want to control. For safety, none are selected by default.",
         "data": {
           "selected_parameters": "Writable Parameters"
         }
@@ -57,6 +63,10 @@
         }
       }
     },
+    "progress": {
+      "discover_sensors": "Connecting to the heater and reading all available sensors with their current values. This may take up to 60 seconds...",
+      "discover_params": "Reading the heater's menu tree to find writable parameters. This may take about 30 seconds..."
+    },
     "error": {
       "cannot_connect": "Failed to connect to the heater. Check your connection settings and cables.",
       "no_sensors": "Connected successfully but no sensors were found.",
@@ -64,7 +74,8 @@
     },
     "abort": {
       "already_configured": "This heater is already configured.",
-      "reconfigure_successful": "Connection updated successfully."
+      "reconfigure_successful": "Connection updated successfully.",
+      "discover_failed": "Sensor discovery failed. Check the connection and try again."
     }
   },
   "options": {

@@ -11,7 +11,7 @@
       },
       "network": {
         "title": "Netzwerkverbindung",
-        "description": "Geben Sie Ihre Verbindungsdaten ein. Nach dem Absenden sucht die Integration nach Sensoren (dauert ca. 60 Sekunden).",
+        "description": "Geben Sie Ihre Verbindungsdaten ein.",
         "data": {
           "device_name": "Gerätename",
           "host": "Host (IP-Adresse oder Hostname)",
@@ -20,29 +20,35 @@
       },
       "serial": {
         "title": "USB Serielle Verbindung",
-        "description": "Geben Sie Ihre Verbindungsdaten ein. Nach dem Absenden sucht die Integration nach Sensoren (dauert ca. 60 Sekunden).",
+        "description": "Geben Sie Ihre Verbindungsdaten ein.",
         "data": {
           "device_name": "Gerätename",
           "serial_device": "Serielles Gerät (z.B. /dev/ttyUSB0 oder COM3)"
         }
       },
+      "discover_sensors": {
+        "title": "Suche nach Sensoren"
+      },
       "sensors": {
         "title": "Sensoren auswählen",
-        "description": "Die Heizung hat die folgenden Sensoren mit ihren aktuellen Werten gemeldet. Wählen Sie aus, welche Sie überwachen möchten.",
+        "description": "Wählen Sie die Sensoren aus, die Sie überwachen möchten.",
         "data": {
           "selected_sensors": "Sensoren"
         }
       },
       "access_mode": {
         "title": "Zugriffsmodus",
-        "description": "Aktivieren Sie den Schreibmodus, um Heizungsparameter über Home Assistant zu steuern. WARNUNG: Falsche Werte können den Betrieb der Heizung beeinträchtigen. Nur aktivieren, wenn Sie die Risiken verstehen. Bei Aktivierung werden schreibbare Parameter gesucht (dauert ca. 30 Sekunden).",
+        "description": "Aktivieren Sie den Schreibmodus, um Heizungsparameter über Home Assistant zu steuern. WARNUNG: Falsche Werte können den Betrieb der Heizung beeinträchtigen. Nur aktivieren, wenn Sie die Risiken verstehen.",
         "data": {
           "write_enabled": "Schreibmodus aktivieren"
         }
       },
+      "discover_params": {
+        "title": "Suche nach Parametern"
+      },
       "parameters": {
         "title": "Parameter auswählen",
-        "description": "Die folgenden schreibbaren Parameter wurden gefunden. Wählen Sie aus, welche Sie steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
+        "description": "Wählen Sie aus, welche Parameter Sie steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
         "data": {
           "selected_parameters": "Schreibbare Parameter"
         }
@@ -57,6 +63,10 @@
         }
       }
     },
+    "progress": {
+      "discover_sensors": "Verbindung zur Heizung wird hergestellt und alle verfügbaren Sensoren werden ausgelesen. Dies kann bis zu 60 Sekunden dauern...",
+      "discover_params": "Die Menüstruktur der Heizung wird ausgelesen, um schreibbare Parameter zu finden. Dies kann ca. 30 Sekunden dauern..."
+    },
     "error": {
       "cannot_connect": "Verbindung zur Heizung fehlgeschlagen. Überprüfen Sie Ihre Verbindungseinstellungen und Kabel.",
       "no_sensors": "Verbindung erfolgreich, aber es wurden keine Sensoren gefunden.",
@@ -64,7 +74,8 @@
     },
     "abort": {
       "already_configured": "Diese Heizung ist bereits konfiguriert.",
-      "reconfigure_successful": "Verbindung erfolgreich aktualisiert."
+      "reconfigure_successful": "Verbindung erfolgreich aktualisiert.",
+      "discover_failed": "Sensorsuche fehlgeschlagen. Überprüfen Sie die Verbindung und versuchen Sie es erneut."
     }
   },
   "options": {
