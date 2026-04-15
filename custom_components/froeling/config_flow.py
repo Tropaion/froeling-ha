@@ -199,6 +199,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         self._write_enabled: bool = False
         self._writable_params: list[WritableParameter] = []
         self._selected_sensors: list[str] = []
+        self._selected_basic_params: list[str] = []
         # Background tasks for progress steps
         self._task: asyncio.Task | None = None
 
@@ -396,41 +397,68 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
 
     async def async_step_parameters(self, user_input=None) -> ConfigFlowResult:
+        """Step 7a: Basic parameter selection."""
         if user_input is not None:
-            # Combine selections from both lists
-            basic_selected = user_input.get(CONF_SELECTED_PARAMETERS, [])
-            expert_selected = user_input.get("selected_expert_parameters", [])
-            all_selected = basic_selected + expert_selected
-            return await self._create_config_entry(selected_parameters=all_selected)
+            self._selected_basic_params = user_input.get(CONF_SELECTED_PARAMETERS, [])
+            # Go to expert choice menu
+            return await self.async_step_expert_choice()
 
-        # Split parameters into basic and expert
         basic_params = [p for p in self._writable_params if not _is_expert_param(p)]
-        expert_params = [p for p in self._writable_params if _is_expert_param(p)]
+        expert_count = sum(1 for p in self._writable_params if _is_expert_param(p))
 
-        basic_options = _params_to_select_options(basic_params)
-        expert_options = _params_to_select_options(expert_params)
-
-        schema_dict: dict = {}
-
-        # Basic parameters list (always shown)
-        if basic_options:
-            schema_dict[vol.Required(CONF_SELECTED_PARAMETERS, default=[])] = SelectSelector(
-                SelectSelectorConfig(options=basic_options, multiple=True, mode=SelectSelectorMode.LIST)
-            )
-
-        # Expert parameters list (shown below basic)
-        if expert_options:
-            schema_dict[vol.Optional("selected_expert_parameters", default=[])] = SelectSelector(
-                SelectSelectorConfig(options=expert_options, multiple=True, mode=SelectSelectorMode.LIST)
-            )
+        options = _params_to_select_options(basic_params)
+        schema = vol.Schema({
+            vol.Required(CONF_SELECTED_PARAMETERS, default=[]): SelectSelector(
+                SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
+            ),
+        })
 
         return self.async_show_form(
             step_id="parameters",
-            data_schema=vol.Schema(schema_dict),
+            data_schema=schema,
             description_placeholders={
                 "count": str(len(basic_params)),
-                "hidden": str(len(expert_params)),
+                "hidden": str(expert_count),
             },
+        )
+
+    # ------------------------------------------------------------------
+    # Step 7b: Expert choice menu
+    # ------------------------------------------------------------------
+
+    async def async_step_expert_choice(self, user_input=None) -> ConfigFlowResult:
+        """Ask user if they want to configure expert parameters."""
+        return self.async_show_menu(
+            step_id="expert_choice",
+            menu_options=["finish_setup", "show_expert"],
+        )
+
+    async def async_step_finish_setup(self, user_input=None) -> ConfigFlowResult:
+        """User chose to skip expert parameters -- create entry with basic only."""
+        return await self._create_config_entry(
+            selected_parameters=getattr(self, '_selected_basic_params', [])
+        )
+
+    async def async_step_show_expert(self, user_input=None) -> ConfigFlowResult:
+        """Step 7c: Expert parameter selection."""
+        if user_input is not None:
+            expert_selected = user_input.get("selected_expert_parameters", [])
+            basic_selected = getattr(self, '_selected_basic_params', [])
+            all_selected = basic_selected + expert_selected
+            return await self._create_config_entry(selected_parameters=all_selected)
+
+        expert_params = [p for p in self._writable_params if _is_expert_param(p)]
+        options = _params_to_select_options(expert_params)
+
+        schema = vol.Schema({
+            vol.Required("selected_expert_parameters", default=[]): SelectSelector(
+                SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
+            ),
+        })
+        return self.async_show_form(
+            step_id="show_expert",
+            data_schema=schema,
+            description_placeholders={"count": str(len(expert_params))},
         )
 
     # ------------------------------------------------------------------
