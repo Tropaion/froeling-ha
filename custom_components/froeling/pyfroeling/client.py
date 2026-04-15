@@ -77,7 +77,13 @@ _log = logging.getLogger(__name__)
 
 # Maximum number of pages to read from paginated commands.
 # Prevents an infinite loop if the controller misbehaves.
-_MAX_PAGES: int = 500
+# Bug 2 fix: raised from 500 to 1000 because the P1 sends many duplicate
+# address entries in its value list (e.g. "Außentemperatur" at 0x0004 can
+# appear 5+ times).  The deduplication logic skips these, so we need more
+# page budget than there are unique sensors.  1000 pages is sufficient for
+# the ~120 unique sensors on a P1 even with heavy duplication, while still
+# providing a safety cap against infinite loops from misbehaving firmware.
+_MAX_PAGES: int = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -557,14 +563,25 @@ class FroelingClient:
             # The menu tree frequently lists the same address under multiple
             # parent nodes.  Deduplicate by address so callers see each register
             # only once.
-            if address in seen_addresses:
+            #
+            # Bug 2 fix: do NOT deduplicate address 0x0000.  Menu GROUP nodes
+            # (container/folder entries that are not associated with any
+            # register) all share address 0x0000.  If we deduplicated on
+            # 0x0000 we would keep only the first group node and silently drop
+            # every subsequent one, causing get_writable_parameters to miss
+            # entire parameter sub-trees.  All other addresses are still
+            # deduplicated as before.
+            if address != 0 and address in seen_addresses:
                 _log.debug(
                     "discover_menu page %d: skipping duplicate address 0x%04X '%s'",
                     page_num, address, data["title"],
                 )
                 first = False
                 continue
-            seen_addresses.add(address)
+            # Only add non-zero addresses to the seen set; 0x0000 group nodes
+            # are allowed to appear multiple times.
+            if address != 0:
+                seen_addresses.add(address)
 
             items.append(MenuItem(
                 menu_type = data["menu_type"],

@@ -193,13 +193,19 @@ class FroelingStateSensor(FroelingEntity, SensorEntity):
     Reads from ``coordinator.data.status.state_text``, which is the German
     state name looked up from STATE_TABLE (e.g. "Heizen", "Abstellen Warten").
     This is the primary status sensor most users will display on their dashboard.
+
+    Bug 3 fix: uses ``translation_key="heater_state"`` so HA displays
+    "Heizungszustand" for German users and "Heater State" for English users
+    (resolved from strings.json / translations/*.json).
     """
 
     def __init__(self, coordinator: FroelingCoordinator) -> None:
         """Initialise the state sensor with a fixed virtual address 0x0001."""
         # Virtual address 0x0001 is chosen to avoid colliding with any real
         # controller address while still fitting the unique_id pattern.
-        super().__init__(coordinator, "UD", 0x0001, "Heater State")
+        # translation_key maps to entity.sensor.froeling.heater_state.name
+        # in the integration's translation files.
+        super().__init__(coordinator, "UD", 0x0001, translation_key="heater_state")
 
     @property
     def native_value(self) -> str | None:
@@ -214,11 +220,14 @@ class FroelingModeSensor(FroelingEntity, SensorEntity):
 
     Reads from ``coordinator.data.status.mode_text``, which carries the
     mode name decoded from the GET_STATE response (e.g. "Automatik").
+
+    Bug 3 fix: uses ``translation_key="operating_mode"`` for i18n support.
     """
 
     def __init__(self, coordinator: FroelingCoordinator) -> None:
         """Initialise the mode sensor with a fixed virtual address 0x0002."""
-        super().__init__(coordinator, "UD", 0x0002, "Operating Mode")
+        # translation_key maps to entity.sensor.froeling.operating_mode.name
+        super().__init__(coordinator, "UD", 0x0002, translation_key="operating_mode")
 
     @property
     def native_value(self) -> str | None:
@@ -238,10 +247,13 @@ class FroelingActiveErrorCountSensor(FroelingEntity, SensorEntity):
 
     Only errors with state == ARRIVED (exactly 1) are counted as "active".
     Acknowledged and gone errors are not counted.
+
+    Bug 3 fix: uses ``translation_key="active_errors"`` for i18n support.
     """
 
     def __init__(self, coordinator: FroelingCoordinator) -> None:
-        super().__init__(coordinator, "ERR", 0x0001, "Active Errors")
+        # translation_key maps to entity.sensor.froeling.active_errors.name
+        super().__init__(coordinator, "ERR", 0x0001, translation_key="active_errors")
         self._attr_icon = "mdi:alert-circle"
         self._attr_state_class = SensorStateClass.MEASUREMENT
 
@@ -259,10 +271,14 @@ class FroelingActiveErrorCountSensor(FroelingEntity, SensorEntity):
 
 
 class FroelingErrorCountTotalSensor(FroelingEntity, SensorEntity):
-    """Total number of entries in the heater's error log (all states)."""
+    """Total number of entries in the heater's error log (all states).
+
+    Bug 3 fix: uses ``translation_key="error_log_entries"`` for i18n support.
+    """
 
     def __init__(self, coordinator: FroelingCoordinator) -> None:
-        super().__init__(coordinator, "ERR", 0x0003, "Error Log Entries")
+        # translation_key maps to entity.sensor.froeling.error_log_entries.name
+        super().__init__(coordinator, "ERR", 0x0003, translation_key="error_log_entries")
         self._attr_icon = "mdi:format-list-bulleted"
         self._attr_state_class = SensorStateClass.MEASUREMENT
         self._attr_entity_registry_enabled_default = False  # disabled by default
@@ -278,9 +294,12 @@ class FroelingLastErrorSensor(FroelingEntity, SensorEntity):
     """Text sensor showing the most recent error's description and state.
 
     Format: "Störung STB (quittiert)" or "Fehler Saugzug (aktiv)"
+
+    Bug 3 fix: uses ``translation_key="last_error"`` for i18n support.
     """
 
-    # Map error states to German display text
+    # Map error states to German display text (values from the heater are German
+    # regardless of HA language; this mapping is intentionally German).
     _STATE_LABELS = {
         ErrorState.ARRIVED: "aktiv",
         ErrorState.ACKNOWLEDGED: "quittiert",
@@ -288,7 +307,8 @@ class FroelingLastErrorSensor(FroelingEntity, SensorEntity):
     }
 
     def __init__(self, coordinator: FroelingCoordinator) -> None:
-        super().__init__(coordinator, "ERR", 0x0002, "Last Error")
+        # translation_key maps to entity.sensor.froeling.last_error.name
+        super().__init__(coordinator, "ERR", 0x0002, translation_key="last_error")
         self._attr_icon = "mdi:alert"
 
     @property

@@ -90,5 +90,29 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "heater_state": {
+        "name": "Heizungszustand"
+      },
+      "operating_mode": {
+        "name": "Betriebsmodus"
+      },
+      "active_errors": {
+        "name": "Aktive Fehler"
+      },
+      "error_log_entries": {
+        "name": "Fehlerprotokoll"
+      },
+      "last_error": {
+        "name": "Letzter Fehler"
+      }
+    },
+    "binary_sensor": {
+      "heater_error": {
+        "name": "Heizungsfehler"
+      }
+    }
   }
 }

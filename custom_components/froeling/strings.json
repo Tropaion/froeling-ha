@@ -90,5 +90,29 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "heater_state": {
+        "name": "Heater State"
+      },
+      "operating_mode": {
+        "name": "Operating Mode"
+      },
+      "active_errors": {
+        "name": "Active Errors"
+      },
+      "error_log_entries": {
+        "name": "Error Log Entries"
+      },
+      "last_error": {
+        "name": "Last Error"
+      }
+    },
+    "binary_sensor": {
+      "heater_error": {
+        "name": "Heater Error"
+      }
+    }
   }
 }

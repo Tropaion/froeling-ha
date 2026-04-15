@@ -31,6 +31,11 @@ class FroelingEntity(CoordinatorEntity[FroelingCoordinator]):
     and are combined with the device name by HA because
     ``_attr_has_entity_name = True``.
 
+    For entities that should use HA's translation system (Bug 3), pass a
+    ``translation_key`` instead of a hardcoded ``name``.  When a translation
+    key is provided, HA looks up the display name from the integration's
+    strings.json / translations/*.json files, enabling full i18n support.
+
     Parameters
     ----------
     coordinator:
@@ -46,11 +51,16 @@ class FroelingEntity(CoordinatorEntity[FroelingCoordinator]):
         count) a synthetic address is chosen (0x0001, 0x0002, …).
     name:
         Human-readable entity name shown below the device card (e.g.
-        "Heater State", "Kessel Ist").
+        "Kessel Ist").  Mutually exclusive with ``translation_key``.
+    translation_key:
+        HA translation key (e.g. ``"heater_state"``).  When provided,
+        ``name`` is ignored and HA resolves the display name from the
+        integration's translation files.  Use this for the fixed meta-entities
+        so they appear in the user's language rather than hardcoded English.
     """
 
     # Setting this to True tells HA that entity names should be combined with
-    # the device name (e.g. "Fröling Heater – Heater State").
+    # the device name (e.g. "Fröling Heater – Heizungszustand").
     _attr_has_entity_name = True
 
     def __init__(
@@ -58,7 +68,8 @@ class FroelingEntity(CoordinatorEntity[FroelingCoordinator]):
         coordinator: FroelingCoordinator,
         sensor_type: str,
         address: int,
-        name: str,
+        name: str | None = None,
+        translation_key: str | None = None,
     ) -> None:
         # Let CoordinatorEntity wire up the coordinator subscription.
         super().__init__(coordinator)
@@ -69,8 +80,18 @@ class FroelingEntity(CoordinatorEntity[FroelingCoordinator]):
         entry_id = coordinator.config_entry.entry_id
         self._attr_unique_id = f"{entry_id}_{sensor_type}_0x{address:04x}"
 
-        # The entity name is the short label shown under the device card.
-        self._attr_name = name
+        if translation_key is not None:
+            # Bug 3 fix: use HA's i18n translation system for meta-entities.
+            # Setting _attr_translation_key tells HA to look up the name from
+            # strings.json / translations/*.json rather than using a hardcoded
+            # English string.  We explicitly clear _attr_name so HA does not
+            # fall back to an empty or None name instead of the translation.
+            self._attr_translation_key = translation_key
+            self._attr_name = None  # Let HA resolve the name from translations
+        else:
+            # Sensor names from the heater are already in German and are used
+            # directly (e.g. "Kessel Ist", "Außentemperatur").
+            self._attr_name = name
 
         # Retain type and address so subclasses can use them if needed.
         self._sensor_type = sensor_type

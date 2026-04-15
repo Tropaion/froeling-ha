@@ -19,9 +19,11 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .const import (
+    CONF_PARAMETER_TITLES,
     CONF_SCAN_INTERVAL,
     CONF_SELECTED_PARAMETERS,
     CONF_SELECTED_SENSORS,
+    CONF_SENSOR_SPECS,
     CONF_WRITE_ENABLED,
     DEFAULT_SCAN_INTERVAL,
     DOMAIN,
@@ -173,10 +175,24 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
                     addr_str,
                 )
 
-        # Mapping from parameter address → human-readable title.
-        # Populated from the coordinator's first successful parameter read so
-        # that subsequent polls can label parameters without extra commands.
+        # -----------------------------------------------------------------------
+        # Bug 1 fix: load parameter title mapping from the config entry.
+        # During the config flow the user selects writable parameters whose
+        # titles are stored as CONF_PARAMETER_TITLES (dict hex-addr → title).
+        # Loading them here means every poll can use the real German title
+        # (e.g. "Betriebsart") instead of the "Parameter 0x02F5" placeholder.
+        # -----------------------------------------------------------------------
         self._parameter_titles: dict[int, str] = {}
+        for addr_str, title in config_entry.data.get(CONF_PARAMETER_TITLES, {}).items():
+            try:
+                # Config entry stores addresses as hex strings like "0x00A3"
+                self._parameter_titles[int(addr_str, 16)] = title
+            except (ValueError, TypeError):
+                # Skip any malformed entries that survived into the config store
+                _LOGGER.debug(
+                    "FroelingCoordinator: ignoring invalid parameter title key: %r",
+                    addr_str,
+                )
 
         _LOGGER.debug(
             "FroelingCoordinator: write_enabled=%s, parameter_addresses=%s",
@@ -189,33 +205,63 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
     # ------------------------------------------------------------------
 
     async def _async_setup(self) -> None:
-        """Discover available sensors from the controller.
+        """Load sensor specs, preferring the cached copy in the config entry.
 
         Called automatically by HA before the first
         :meth:`_async_update_data` invocation (via
         :meth:`async_config_entry_first_refresh`).
 
-        The sensor-discovery exchange (GET_VALUE_LIST_FIRST / _NEXT) can
-        take a few seconds on controllers with many sensors, so running it
-        once at startup avoids a slow-down on every 60-second poll cycle.
+        Bug 4 / Bug 5 fix:
+        The slow GET_VALUE_LIST_FIRST/NEXT discovery exchange (~90 s on the
+        P1) is now skipped on startup if the config entry already contains
+        cached ``sensor_specs`` data.  The config flow stores these specs
+        when it creates the entry.  Old entries without the cache field fall
+        back to live discovery so existing installations keep working.
 
         Raises
         ------
         UpdateFailed
-            If the discovery query fails for any reason.
+            If live discovery is needed and it fails for any reason.
         """
-        _LOGGER.debug("FroelingCoordinator: discovering sensors...")
-        try:
-            self._specs = await self.client.discover_sensors()
-            _LOGGER.debug(
-                "FroelingCoordinator: discovered %d sensor specs", len(self._specs)
+        cached_specs = self.config_entry.data.get(CONF_SENSOR_SPECS, [])
+
+        if cached_specs:
+            # Fast path: rebuild ValueSpec objects from the cached dicts.
+            # This avoids the ~90-second discovery exchange on every HA restart.
+            self._specs = [
+                ValueSpec(
+                    address   = s["address"],
+                    factor    = s["factor"],
+                    unit      = s["unit"],
+                    title     = s["title"],
+                    menu_type = s["menu_type"],
+                )
+                for s in cached_specs
+            ]
+            _LOGGER.info(
+                "FroelingCoordinator: loaded %d cached sensor specs from config entry",
+                len(self._specs),
             )
-        except FroelingError as exc:
-            # Wrap library errors in UpdateFailed so HA marks the entry as
-            # "unavailable" rather than crashing the event loop.
-            raise UpdateFailed(
-                f"Failed to discover sensors from Fröling heater: {exc}"
-            ) from exc
+        else:
+            # Slow path / fallback: ask the controller for the full spec list.
+            # This runs once for old config entries that predate the spec cache,
+            # and whenever the user sets up the integration from scratch without
+            # a cached entry (e.g. first install before this fix was shipped).
+            _LOGGER.debug(
+                "FroelingCoordinator: no cached specs – discovering sensors from heater…"
+            )
+            try:
+                self._specs = await self.client.discover_sensors()
+                _LOGGER.info(
+                    "FroelingCoordinator: discovered %d sensor specs from heater",
+                    len(self._specs),
+                )
+            except FroelingError as exc:
+                # Wrap library errors in UpdateFailed so HA marks the entry as
+                # "unavailable" rather than crashing the event loop.
+                raise UpdateFailed(
+                    f"Failed to discover sensors from Fröling heater: {exc}"
+                ) from exc
 
     # ------------------------------------------------------------------
     # Polling (called every SCAN_INTERVAL seconds)

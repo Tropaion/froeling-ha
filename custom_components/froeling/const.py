@@ -63,6 +63,18 @@ CONF_WRITE_ENABLED = "write_enabled"
 # that the user selected for control during the config flow.
 CONF_SELECTED_PARAMETERS = "selected_parameters"
 
+# Mapping from hex address string (e.g. "0x00A3") to the human-readable title
+# of each writable parameter.  Built during the config flow and stored in the
+# config entry so the coordinator can label parameters without re-discovering
+# the menu tree on every startup.
+CONF_PARAMETER_TITLES = "parameter_titles"
+
+# Cached list of sensor ValueSpec dicts discovered during the config flow.
+# Each entry is a dict with keys: address, factor, unit, title, menu_type.
+# Stored in the config entry so the coordinator can skip the slow sensor-
+# discovery exchange on every startup (fixes Bug 4 / Bug 5).
+CONF_SENSOR_SPECS = "sensor_specs"
+
 # Keys stored in config_entry.options (user-adjustable settings).
 CONF_SCAN_INTERVAL = "scan_interval"
 

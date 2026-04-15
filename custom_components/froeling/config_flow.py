@@ -43,10 +43,12 @@ from .const import (
     CONF_CONNECTION_TYPE,
     CONF_DEVICE_NAME,
     CONF_HOST,
+    CONF_PARAMETER_TITLES,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
     CONF_SELECTED_PARAMETERS,
     CONF_SELECTED_SENSORS,
+    CONF_SENSOR_SPECS,
     CONF_SERIAL_DEVICE,
     CONF_WRITE_ENABLED,
     CONN_TYPE_NETWORK,
@@ -403,6 +405,39 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         else:
             data[CONF_HOST] = self._host
             data[CONF_PORT] = self._port
+
+        # -----------------------------------------------------------------------
+        # Bug 1 fix: store writable parameter titles so the coordinator can label
+        # parameters by their real names (e.g. "Betriebsart") instead of showing
+        # the generic "Parameter 0x02F5" fallback.  The title mapping survives
+        # across HA restarts because it is embedded in the config entry data.
+        # -----------------------------------------------------------------------
+        param_titles: dict[str, str] = {}
+        for param in self._writable_params:
+            addr_hex = f"0x{param.address:04X}"
+            param_titles[addr_hex] = param.title
+        data[CONF_PARAMETER_TITLES] = param_titles
+
+        # -----------------------------------------------------------------------
+        # Bug 4 / Bug 5 fix: cache the discovered sensor specs in the config entry
+        # so the coordinator can skip the slow GET_VALUE_LIST_FIRST/NEXT exchange
+        # on every startup.  If the coordinator finds cached specs it uses them
+        # directly; otherwise it falls back to live discovery (old entries without
+        # this field will continue to work after a one-time upgrade).
+        # -----------------------------------------------------------------------
+        sensor_specs_data: list[dict] = []
+        for sensor in self._discovered:
+            # Only store readable (successfully polled) specs; unreadable sensors
+            # should not be offered as entities because they produce no data.
+            if sensor.readable:
+                sensor_specs_data.append({
+                    "address":   sensor.spec.address,
+                    "factor":    sensor.spec.factor,
+                    "unit":      sensor.spec.unit,
+                    "title":     sensor.spec.title,
+                    "menu_type": sensor.spec.menu_type,
+                })
+        data[CONF_SENSOR_SPECS] = sensor_specs_data
 
         return self.async_create_entry(title=self._device_name, data=data)
 

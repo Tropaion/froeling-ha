@@ -149,6 +149,9 @@ class FroelingErrorBinarySensor(FroelingEntity, BinarySensorEntity):
     device_class=PROBLEM causes HA to show the entity as "Problem" (red) when
     on and "OK" (green) when off.
 
+    Bug 3 fix: uses ``translation_key="heater_error"`` so HA displays
+    "Heizungsfehler" for German users and "Heater Error" for English users.
+
     A typical automation monitors this entity: if it turns on, send a push
     notification with the value of FroelingLastErrorSensor.
     """
@@ -157,7 +160,8 @@ class FroelingErrorBinarySensor(FroelingEntity, BinarySensorEntity):
         """Initialise the error binary sensor with virtual address 0x0000."""
         # Virtual address 0x0000 is safe here because the controller's real
         # DIG_OUT/DIG_IN addresses start at 0x0001.
-        super().__init__(coordinator, "ERR", 0x0000, "Heater Error")
+        # translation_key maps to entity.binary_sensor.froeling.heater_error.name
+        super().__init__(coordinator, "ERR", 0x0000, translation_key="heater_error")
 
         # PROBLEM device class: on = problem detected, off = everything OK.
         self._attr_device_class = BinarySensorDeviceClass.PROBLEM
