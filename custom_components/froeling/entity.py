@@ -59,9 +59,11 @@ class FroelingEntity(CoordinatorEntity[FroelingCoordinator]):
         so they appear in the user's language rather than hardcoded English.
     """
 
-    # Setting this to True tells HA that entity names should be combined with
-    # the device name (e.g. "Fröling Heater – Heizungszustand").
-    _attr_has_entity_name = True
+    # has_entity_name = False: entity names are used as-is without prepending
+    # the device name. "Kesseltemperatur" stays "Kesseltemperatur", not
+    # "Fröling P1 Kesseltemperatur". All entities are grouped under the
+    # device anyway, so the prefix is redundant.
+    _attr_has_entity_name = False
 
     def __init__(
         self,

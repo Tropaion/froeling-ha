@@ -421,12 +421,11 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         # Delegate to the client; it handles the protocol handshake
         confirmed = await self.client.set_parameter(address, value, factor)
 
-        # Force an immediate full refresh so ALL entities (including the state
-        # sensor) reflect the new value right away. async_refresh() waits for
-        # the refresh to complete (unlike async_request_refresh which just
-        # schedules it). This also resets the polling timer so the next
-        # scheduled poll happens a full interval later.
-        await self.async_refresh()
+        # Schedule a refresh so entities update shortly after the write.
+        # Using async_request_refresh() (non-blocking) instead of async_refresh()
+        # (blocking) to avoid all entities briefly showing "unavailable" while
+        # the refresh is in progress. Entities will update within ~1 second.
+        await self.async_request_refresh()
 
         return confirmed
 
