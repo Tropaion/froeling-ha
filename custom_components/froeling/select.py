@@ -33,6 +33,60 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Known option labels for common parameters
+# ---------------------------------------------------------------------------
+# The heater's binary protocol does NOT include text labels for parameter
+# options -- those only exist on the LCD display. This table maps known
+# parameter titles to their option labels so we can show "Sommerbetrieb"
+# instead of "0".
+#
+# Format: { "parameter_title_substring": { int_value: "Label", ... } }
+# The title substring is matched case-insensitively.
+
+KNOWN_OPTION_LABELS: dict[str, dict[int, str]] = {
+    "Betriebsart": {
+        0: "Sommerbetrieb",
+        1: "Übergangsbetrieb",
+        2: "Winterbetrieb",
+    },
+    "Solar-System": {
+        1: "Puffer",
+        2: "Boiler",
+        3: "Puffer + Boiler",
+    },
+    "Gleitender Betrieb aktiv": {
+        0: "Aus",
+        1: "Ein",
+    },
+}
+
+# Generic labels for parameters with min=0, max=1 (boolean-like)
+_BOOL_LABELS: dict[int, str] = {
+    0: "Aus",
+    1: "Ein",
+}
+
+
+def _get_option_labels(param: WritableParameter) -> dict[int, str] | None:
+    """Look up known option labels for a parameter.
+
+    Checks the KNOWN_OPTION_LABELS table first. If not found and the
+    parameter looks boolean (min=0, max=1), uses generic Aus/Ein labels.
+    Returns None if no labels are available.
+    """
+    # Check known labels by title substring match
+    for title_key, labels in KNOWN_OPTION_LABELS.items():
+        if title_key.lower() in param.title.lower():
+            return labels
+
+    # Boolean-like parameters: min=0, max=1 -> Aus/Ein
+    if int(param.min_value) == 0 and int(param.max_value) == 1:
+        return _BOOL_LABELS
+
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Platform setup
 # ---------------------------------------------------------------------------
 
@@ -149,33 +203,47 @@ class FroelingSelectEntity(FroelingEntity, SelectEntity):
         self._address = param.address
 
         # Build the option list from the allowed integer range.
-        # min_value and max_value are floats but represent whole-number choices;
-        # convert to int to generate clean option strings like "0", "1", "2".
         low = int(param.min_value)
         high = int(param.max_value)
-        # options must be strings (HA SelectEntity contract)
-        self._attr_options = [str(i) for i in range(low, high + 1)]
+
+        # Look up known labels for this parameter (e.g., Betriebsart -> Sommerbetrieb)
+        self._labels = _get_option_labels(param)
+
+        if self._labels:
+            # Use readable labels as options
+            self._attr_options = [
+                self._labels.get(i, str(i)) for i in range(low, high + 1)
+            ]
+            # Reverse map: label -> int value
+            self._label_to_value = {
+                self._labels.get(i, str(i)): i for i in range(low, high + 1)
+            }
+        else:
+            # No known labels: show numeric strings
+            self._attr_options = [str(i) for i in range(low, high + 1)]
+            self._label_to_value = {str(i): i for i in range(low, high + 1)}
 
         # Remember the factor for encode/decode during set operations.
-        # Choice parameters usually have factor=1 (they are raw integer codes)
-        # but we honour whatever the heater reports.
         self._factor = param.factor
+        self._min_value = low
 
     @property
     def current_option(self) -> str | None:
-        """Return the currently active option as a string.
+        """Return the currently active option label.
 
         Reads the current value from the coordinator snapshot, converts it to
-        an integer, then returns its string representation.  Returns None if
-        the parameter is absent (coordinator has no data yet or read failed).
+        the corresponding label string. Returns None if the parameter is absent.
         """
         if self.coordinator.data is None:
             return None
         wp = self.coordinator.data.parameters.get(self._address)
         if wp is None:
             return None
-        # Convert float value to integer string (choice parameters have digits=0)
-        return str(int(wp.value))
+        # Convert the numeric value to the label (or numeric string as fallback)
+        int_val = int(wp.value)
+        if self._labels:
+            return self._labels.get(int_val, str(int_val))
+        return str(int_val)
 
     async def async_select_option(self, option: str) -> None:
         """Write the selected option to the heater.
@@ -193,8 +261,12 @@ class FroelingSelectEntity(FroelingEntity, SelectEntity):
             "FroelingSelectEntity: setting 0x%04X '%s' to option '%s'",
             self._address, self.name, option,
         )
-        # Convert the option string (e.g. "2") to a float for the coordinator
-        value = float(option)
+        # Convert the label back to the numeric value
+        int_value = self._label_to_value.get(option)
+        if int_value is None:
+            # Fallback: try to parse as number directly
+            int_value = int(option)
+        value = float(int_value)
         confirmed = await self.coordinator.async_write_parameter(
             self._address, value, self._factor
         )
