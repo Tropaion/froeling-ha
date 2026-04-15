@@ -1,0 +1,68 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Fröling Heizung Verbindung",
+        "description": "Wie ist Ihre Heizung angeschlossen?",
+        "menu_options": {
+          "network": "Netzwerk (TCP-zu-Seriell Konverter)",
+          "serial": "USB Seriell (Direktverbindung)"
+        }
+      },
+      "network": {
+        "title": "Netzwerkverbindung",
+        "description": "Geben Sie die IP-Adresse und den Port Ihres TCP-zu-Seriell Konverters ein, der mit dem COM1-Anschluss der Heizung verbunden ist.",
+        "data": {
+          "device_name": "Gerätename",
+          "host": "Host (IP-Adresse oder Hostname)",
+          "port": "Port"
+        }
+      },
+      "serial": {
+        "title": "USB Serielle Verbindung",
+        "description": "Geben Sie den Gerätepfad des USB-zu-RS232 Adapters ein, der mit dem COM1-Anschluss der Heizung verbunden ist.",
+        "data": {
+          "device_name": "Gerätename",
+          "serial_device": "Serielles Gerät (z.B. /dev/ttyUSB0 oder COM3)"
+        }
+      },
+      "sensors": {
+        "title": "Sensoren auswählen",
+        "description": "Die Heizung wurde kontaktiert und hat die folgenden Sensoren mit ihren aktuellen Werten gemeldet. Wählen Sie die Sensoren aus, die Sie überwachen möchten.",
+        "data": {
+          "selected_sensors": "Sensoren"
+        }
+      },
+      "reconfigure": {
+        "title": "Verbindung neu konfigurieren",
+        "description": "Aktualisieren Sie die Verbindungseinstellungen.",
+        "data": {
+          "host": "Host",
+          "port": "Port",
+          "serial_device": "Serielles Gerät"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zur Heizung fehlgeschlagen. Überprüfen Sie Ihre Verbindungseinstellungen und Kabel.",
+      "no_sensors": "Verbindung erfolgreich, aber es wurden keine Sensoren gefunden.",
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten."
+    },
+    "abort": {
+      "already_configured": "Diese Heizung ist bereits konfiguriert.",
+      "reconfigure_successful": "Verbindung erfolgreich aktualisiert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Fröling Heizung Optionen",
+        "description": "Abfrageintervall und Sensorauswahl anpassen.",
+        "data": {
+          "scan_interval": "Abfrageintervall (Sekunden)",
+          "selected_sensors": "Sensoren"
+        }
+      }
+    }
+  }
+}
