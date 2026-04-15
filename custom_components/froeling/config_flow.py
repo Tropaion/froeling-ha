@@ -131,15 +131,12 @@ def _sensors_to_select_options(sensors: list[DiscoveredSensor]) -> tuple[list[Se
 def _format_param_value(param: WritableParameter) -> str:
     """Format a parameter's current value with known labels where possible.
 
-    Uses the same KNOWN_OPTION_LABELS from select.py to show readable values
-    in the config flow selection list (e.g., "Betriebsart = Übergangsbetrieb"
-    instead of "Betriebsart = 1").
+    Uses the address-based lookup from known_params.py.
     """
-    # Import the label lookup from select.py
-    from .select import _get_option_labels
+    from .known_params import get_option_labels
 
     int_val = int(param.value) if param.value == int(param.value) else None
-    labels = _get_option_labels(param)
+    labels = get_option_labels(param.address)
 
     if labels and int_val is not None and int_val in labels:
         return labels[int_val]
@@ -167,49 +164,15 @@ def _params_to_select_options(params: list[WritableParameter]) -> list[SelectOpt
     return options
 
 
-# ---------------------------------------------------------------------------
-# Parameter categorization (Basic vs Expert)
-# ---------------------------------------------------------------------------
-
-# Keywords in parameter titles that indicate expert/internal settings.
-# Parameters matching ANY of these are hidden by default.
-_EXPERT_KEYWORDS: list[str] = [
-    # Calibration / controller tuning
-    "Regler", "Kp", "Tn", "Td", "Abtastrate", "Filterkonstante",
-    "Proportionalfaktor", "Nachstellzeit", "Reglerverstärkung",
-    # Internal sensor/output assignments
-    "Welcher Fühler", "Welche Pumpe", "Welche Ausgang",
-    # System internals
-    "Vorgabewerte übernehmen", "Standardwerte übernehmen",
-    "Modem vorhanden", "Speicherzyklus des Datenloggers",
-    "Display mit Adresse", "Funktion des Bediengerätes",
-    # Combustion internals
-    "O2-Regler", "O2 Regler", "O2 Soll", "O2 Überwachung",
-    "Lambdasonden", "Saugzug Min", "Saugzug Max",
-    "Saugzug beim", "Einschubperiode", "Einschubzeit",
-    "Maximaler Einschub", "Minimaler Einschub",
-    "Einschub beim", "Sicherheitszeit", "WOS Laufzeit",
-    "Überwachungs Fenster", "Luftmenge welche",
-    "Maximale Abweichung", "Startverzögerung für O2",
-    # Ash / cleaning internals
-    "Zyklus der Ascheaustragung", "Laufzeit der Ascheschnecke",
-    "Absperrschieber", "Mindestfahrweg",
-    # Fuel internals
-    "Kein Einschub wenn", "Restsauerstoffgehalt, über dem",
-    "Einflussfaktor für O2",
-    # Pellets internals
-    "Nachfüllen des Zyklons",
-]
-
-
 def _is_expert_param(param: WritableParameter) -> bool:
     """Check if a parameter is an expert/internal setting.
 
-    Returns True if the parameter title contains any expert keyword.
-    These parameters are hidden by default in the selection list.
+    Uses address-based lookup from known_params.py. Parameters NOT in the
+    known basic table are automatically categorized as expert and hidden
+    by default.
     """
-    title = param.title
-    return any(kw in title for kw in _EXPERT_KEYWORDS)
+    from .known_params import is_basic_param
+    return not is_basic_param(param.address)
 
 
 def _create_client_from_data(data: dict[str, Any]) -> FroelingClient:

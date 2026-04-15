@@ -33,55 +33,25 @@ _LOGGER = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Known option labels for common parameters
+# Option label lookup
 # ---------------------------------------------------------------------------
-# The heater's binary protocol does NOT include text labels for parameter
-# options -- those only exist on the LCD display. This table maps known
-# parameter titles to their option labels so we can show "Sommerbetrieb"
-# instead of "0".
-#
-# Format: { "parameter_title_substring": { int_value: "Label", ... } }
-# The title substring is matched case-insensitively.
-
-KNOWN_OPTION_LABELS: dict[str, dict[int, str]] = {
-    "Betriebsart": {
-        0: "Sommerbetrieb",
-        1: "Übergangsbetrieb",
-        2: "Winterbetrieb",
-    },
-    "Solar-System": {
-        1: "Puffer",
-        2: "Boiler",
-        3: "Puffer + Boiler",
-    },
-    "Gleitender Betrieb aktiv": {
-        0: "Aus",
-        1: "Ein",
-    },
-}
-
-# Generic labels for parameters with min=0, max=1 (boolean-like)
-_BOOL_LABELS: dict[int, str] = {
-    0: "Aus",
-    1: "Ein",
-}
-
 
 def _get_option_labels(param: WritableParameter) -> dict[int, str] | None:
-    """Look up known option labels for a parameter.
+    """Look up known option labels for a parameter by address.
 
-    Checks the KNOWN_OPTION_LABELS table first. If not found and the
-    parameter looks boolean (min=0, max=1), uses generic Aus/Ein labels.
-    Returns None if no labels are available.
+    Uses the address-based KNOWN_BASIC_PARAMS table from known_params.py.
+    Falls back to generic Aus/Ein for boolean-like parameters (min=0, max=1).
     """
-    # Check known labels by title substring match
-    for title_key, labels in KNOWN_OPTION_LABELS.items():
-        if title_key.lower() in param.title.lower():
-            return labels
+    from .known_params import get_option_labels
 
-    # Boolean-like parameters: min=0, max=1 -> Aus/Ein
+    # Address-based lookup (most reliable)
+    labels = get_option_labels(param.address)
+    if labels:
+        return labels
+
+    # Generic fallback: boolean-like parameters (min=0, max=1)
     if int(param.min_value) == 0 and int(param.max_value) == 1:
-        return _BOOL_LABELS
+        return {0: "Aus", 1: "Ein"}
 
     return None
 
