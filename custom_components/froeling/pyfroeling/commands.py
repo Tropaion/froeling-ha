@@ -62,13 +62,10 @@ _UNIT_CORRECTION: dict[str, str] = {
 _TITLE_UNIT_CORRECTION: dict[tuple[str, str], str] = {
     # "m" is ambiguous: could be meters, minutes, or millivolts.
     # Only correct for specific sensor names where the meaning is unambiguous.
-    ("Lambdasonde",     "m"):  "mV",   # Lambda probe voltage is always millivolts
+    ("Spannung",        "m"):  "mV",   # Truncated "mV" -> millivolts (if it were V, heater sends "V" directly)
     ("Betriebsstunden", "m"):  "h",    # Operating hours
     ("Laufzeit",        "m"):  "min",  # Runtime -> minutes
     ("Lastspiele",      ""):   "",     # Count, no unit
-    # NOTE: Do NOT add a generic "Spannung" -> "mV" rule here.
-    # Some voltage sensors report in V, others in mV. Only add specific
-    # sensor names where the unit is known with certainty.
 }
 
 
