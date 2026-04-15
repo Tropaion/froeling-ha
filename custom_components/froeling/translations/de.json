@@ -27,7 +27,8 @@
         }
       },
       "discover_sensors": {
-        "title": "Suche nach Sensoren"
+        "title": "Suche nach Sensoren",
+        "description": "Verbindung zur Heizung wird hergestellt und alle verfügbaren Sensoren mit ihren aktuellen Werten werden ausgelesen. Dies kann bis zu 60 Sekunden dauern..."
       },
       "sensors": {
         "title": "Sensoren auswählen",
@@ -53,7 +54,8 @@
         }
       },
       "discover_parameters": {
-        "title": "Suche nach Parametern"
+        "title": "Suche nach Parametern",
+        "description": "Die Menüstruktur der Heizung wird ausgelesen, um schreibbare Parameter zu finden. Dies kann einen Moment dauern..."
       },
       "parameters": {
         "title": "Parameter auswählen",

@@ -269,9 +269,12 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             self._sensor_discover_task = self.hass.async_create_task(
                 self._async_do_sensor_discovery()
             )
+
+        if not self._sensor_discover_task.done():
             return self.async_show_progress(
                 step_id="discover_sensors",
                 progress_action="discovering_sensors",
+                progress_task=self._sensor_discover_task,
             )
 
         # Task completed - check result
@@ -371,9 +374,12 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             self._param_discover_task = self.hass.async_create_task(
                 self._async_do_parameter_discovery()
             )
+
+        if not self._param_discover_task.done():
             return self.async_show_progress(
                 step_id="discover_parameters",
                 progress_action="discovering_parameters",
+                progress_task=self._param_discover_task,
             )
 
         try:

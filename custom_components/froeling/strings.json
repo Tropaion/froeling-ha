@@ -27,7 +27,8 @@
         }
       },
       "discover_sensors": {
-        "title": "Scanning for Sensors"
+        "title": "Scanning for Sensors",
+        "description": "Connecting to the heater and reading all available sensors with their current values. This may take up to 60 seconds..."
       },
       "sensors": {
         "title": "Select Sensors",
@@ -53,7 +54,8 @@
         }
       },
       "discover_parameters": {
-        "title": "Scanning for Parameters"
+        "title": "Scanning for Parameters",
+        "description": "Reading the heater's menu tree to find writable parameters. This may take a moment..."
       },
       "parameters": {
         "title": "Select Parameters",
