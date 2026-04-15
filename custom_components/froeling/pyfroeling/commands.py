@@ -39,27 +39,68 @@ from .models import ErrorState
 # Helper
 # ---------------------------------------------------------------------------
 
-def _normalize_unit(unit: str) -> str:
+# ---------------------------------------------------------------------------
+# Unit correction
+# ---------------------------------------------------------------------------
+
+# The Lambdatronic protocol uses a 2-byte field for units.  Units longer than
+# 2 characters get truncated by the controller firmware, producing misleading
+# abbreviations.  This table maps known truncated units back to their correct
+# full form.
+#
+# Additionally, some units are just shorthand that the controller uses
+# internally and don't match standard abbreviations.
+_UNIT_CORRECTION: dict[str, str] = {
+    "°":  "°C",    # Lone degree sign -> degrees Celsius
+    "U":  "U/min", # Revolutions -> RPM (Saugzugdrehzahl)
+    "l":  "l/h",   # Litres -> litres per hour (flow rate sensors)
+}
+
+# Some sensors have units that are technically correct as a 2-byte truncation
+# but ambiguous.  This table maps (sensor_title_substring, raw_unit) -> corrected_unit.
+# Checked AFTER _UNIT_CORRECTION, so "°" is already "°C" at this point.
+_TITLE_UNIT_CORRECTION: dict[tuple[str, str], str] = {
+    # "m" is ambiguous: could be meters, minutes, or millivolts
+    ("Lambdasonde",     "m"):  "mV",   # Lambdasondenspannung -> millivolts
+    ("Spannung",        "m"):  "mV",   # Any voltage sensor -> millivolts
+    ("Betriebsstunden", "m"):  "h",    # Operating hours
+    ("Laufzeit",        "m"):  "min",  # Runtime -> minutes
+    ("Lastspiele",      ""):   "",     # Count, no unit
+}
+
+
+def _normalize_unit(unit: str, title: str = "") -> str:
     """Normalise a raw unit string from the controller.
 
-    The controller sends "°" (degree-only) for temperature channels.
-    We append "C" to produce the standard "°C" abbreviation.
+    Applies two correction passes:
+    1. Direct unit replacement from _UNIT_CORRECTION (e.g., "°" -> "°C")
+    2. Context-aware correction from _TITLE_UNIT_CORRECTION using the sensor
+       title to disambiguate (e.g., "m" -> "mV" for voltage sensors)
 
     Parameters
     ----------
     unit:
-        Raw unit string decoded from the payload.
+        Raw unit string decoded from the 2-byte payload field.
+    title:
+        Sensor title, used for context-aware disambiguation.
 
     Returns
     -------
     str
-        Unit string with "°" replaced by "°C" where appropriate.
+        Corrected unit string.
     """
-    # A lone degree sign without a following letter should become "°C".
-    # We strip first to handle trailing whitespace from fixed-length fields.
     unit = unit.strip()
-    if unit == "°":
-        return "°C"
+
+    # Pass 1: Direct unit correction
+    if unit in _UNIT_CORRECTION:
+        unit = _UNIT_CORRECTION[unit]
+
+    # Pass 2: Context-aware correction based on sensor title
+    for (title_substr, raw_unit), corrected in _TITLE_UNIT_CORRECTION.items():
+        if title_substr in title and unit == raw_unit:
+            unit = corrected
+            break
+
     return unit
 
 
@@ -417,19 +458,22 @@ def parse_value_spec_response(payload: bytes) -> dict[str, Any]:
     # --- menu_type (2 bytes, unsigned big-endian) ---
     (menu_type,) = struct.unpack(">H", payload[3:5])
 
-    # --- unit (2 bytes, latin-1 text) ---
-    unit: str = _normalize_unit(_decode_string(payload[5:7]))
+    # --- unit (2 bytes, latin-1 text) -- decoded but not yet normalized ---
+    unit_raw: str = _decode_string(payload[5:7])
 
     # --- address (2 bytes, unsigned big-endian) ---
     (address,) = struct.unpack(">H", payload[7:9])
 
     # --- title (remaining bytes, null-terminated latin-1 string) ---
     title_raw: bytes = payload[9:]
-    # Strip at the first null byte if present.
     null_pos = title_raw.find(b"\x00")
     if null_pos != -1:
         title_raw = title_raw[:null_pos]
     title: str = _decode_string(title_raw)
+
+    # Normalize unit AFTER title is known, so context-aware corrections
+    # (e.g., "m" -> "mV" for voltage sensors) can use the title.
+    unit: str = _normalize_unit(unit_raw, title)
 
     return {
         "more": True,
