@@ -48,10 +48,17 @@
       },
       "parameters": {
         "title": "Parameter auswählen",
-        "description": "{count} Basis-Parameter gefunden ({hidden} Experten-Parameter verfügbar). Zur Sicherheit ist standardmäßig keiner ausgewählt.",
+        "description": "{count} Basis-Parameter gefunden ({hidden} Experten-Parameter im nächsten Schritt verfügbar). Zur Sicherheit ist standardmäßig keiner ausgewählt.",
         "data": {
-          "selected_parameters": "Basis-Parameter",
-          "show_expert": "Ich möchte auch Experten-Parameter konfigurieren"
+          "selected_parameters": "Basis-Parameter"
+        }
+      },
+      "expert_choice": {
+        "title": "Experten-Parameter",
+        "description": "Möchten Sie Experten-/interne Parameter konfigurieren? Diese sind erweiterte Heizungseinstellungen, die nur geändert werden sollten, wenn Sie wissen, was Sie tun.",
+        "menu_options": {
+          "finish_setup": "Einrichtung abschließen (Experten-Parameter überspringen)",
+          "show_expert": "Experten-Parameter konfigurieren"
         }
       },
       "show_expert": {

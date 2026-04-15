@@ -397,39 +397,46 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
     # ------------------------------------------------------------------
 
     async def async_step_parameters(self, user_input=None) -> ConfigFlowResult:
-        """Step 7: Basic parameter selection with optional expert toggle."""
+        """Step 7a: Basic parameter selection."""
         if user_input is not None:
-            basic_selected = user_input.get(CONF_SELECTED_PARAMETERS, [])
-            show_expert = user_input.get("show_expert", False)
-
-            if show_expert:
-                # Save basic selection, proceed to expert page
-                self._selected_basic_params = basic_selected
-                return await self.async_step_show_expert()
-
-            # No expert needed -- create entry with basic params only
-            return await self._create_config_entry(selected_parameters=basic_selected)
+            self._selected_basic_params = user_input.get(CONF_SELECTED_PARAMETERS, [])
+            # Go to expert choice menu
+            return await self.async_step_expert_choice()
 
         basic_params = [p for p in self._writable_params if not _is_expert_param(p)]
         expert_count = sum(1 for p in self._writable_params if _is_expert_param(p))
 
         options = _params_to_select_options(basic_params)
-        schema_dict: dict = {
+        schema = vol.Schema({
             vol.Required(CONF_SELECTED_PARAMETERS, default=[]): SelectSelector(
                 SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
             ),
-        }
-        # Show expert toggle only if expert params exist
-        if expert_count > 0:
-            schema_dict[vol.Optional("show_expert", default=False)] = bool
+        })
 
         return self.async_show_form(
             step_id="parameters",
-            data_schema=vol.Schema(schema_dict),
+            data_schema=schema,
             description_placeholders={
                 "count": str(len(basic_params)),
                 "hidden": str(expert_count),
             },
+        )
+
+    # ------------------------------------------------------------------
+    # Step 7b: Expert choice menu
+    # ------------------------------------------------------------------
+
+    async def async_step_expert_choice(self, user_input=None) -> ConfigFlowResult:
+        """Ask user if they want to configure expert parameters."""
+        return self.async_show_menu(
+            step_id="expert_choice",
+            menu_options=["finish_setup", "show_expert"],
+        )
+
+    async def async_step_finish_setup(self, user_input=None) -> ConfigFlowResult:
+        """User chose to skip expert parameters -- create entry with basic only."""
+        return await self._create_config_entry(
+            selected_parameters=getattr(self, '_selected_basic_params', [])
         )
 
     async def async_step_show_expert(self, user_input=None) -> ConfigFlowResult:
