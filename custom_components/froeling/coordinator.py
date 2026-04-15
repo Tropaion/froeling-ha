@@ -421,20 +421,54 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         # Delegate to the client; it handles the protocol handshake
         confirmed = await self.client.set_parameter(address, value, factor)
 
-        # Force a full refresh so all entities (including the heater state
-        # sensor) reflect the new value immediately. Wrapped in try/except
-        # so a transient read failure after the write doesn't mark all
-        # entities as "unavailable" -- the write itself already succeeded.
-        try:
-            await self.async_refresh()
-        except Exception:
-            _LOGGER.debug("Post-write refresh failed, entities will update on next poll")
+        # Trigger an immediate poll by setting the next update to 1 second.
+        # After that poll completes, the normal interval is restored.
+        # This is more reliable than async_refresh() which can fail or
+        # conflict with the connection state after a write.
+        self._schedule_post_write_refresh()
 
         return confirmed
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
+
+    def _schedule_post_write_refresh(self) -> None:
+        """Reset the polling timer so the next update happens in ~2 seconds.
+
+        After a parameter write, we want sensors to refresh quickly without
+        calling async_refresh() inline (which can conflict with the connection
+        state). This temporarily shortens the update interval, then restores
+        it after one poll cycle.
+        """
+        from datetime import timedelta
+
+        # Store the original interval if not already saved
+        if not hasattr(self, '_original_interval'):
+            self._original_interval = self.update_interval
+
+        # Set a very short interval so the next poll fires almost immediately
+        # (2s delay gives the heater time to settle after the write)
+        self.update_interval = timedelta(seconds=2)
+
+        # After the next update completes, restore the original interval.
+        # We do this by hooking into the coordinator's listener system.
+        def _restore_interval() -> None:
+            if hasattr(self, '_original_interval'):
+                self.update_interval = self._original_interval
+                del self._original_interval
+
+        # Use async_add_listener to run once after the next data update
+        remove_listener = self.async_add_listener(lambda: None)
+
+        async def _restore_after_delay() -> None:
+            """Wait for the short-interval poll, then restore normal interval."""
+            import asyncio
+            await asyncio.sleep(5)  # Enough time for one short poll to complete
+            _restore_interval()
+            remove_listener()
+
+        self.hass.async_create_task(_restore_after_delay())
 
     def _get_selected_specs(self) -> list[ValueSpec]:
         """Return only the specs that the user selected during setup.
