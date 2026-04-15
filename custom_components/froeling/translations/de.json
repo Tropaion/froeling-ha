@@ -31,7 +31,7 @@
       },
       "sensors": {
         "title": "Sensoren auswählen",
-        "description": "Wählen Sie die Sensoren aus, die Sie überwachen möchten.",
+        "description": "{count} Sensoren gefunden. Wählen Sie die Sensoren aus, die Sie überwachen möchten.",
         "data": {
           "selected_sensors": "Sensoren"
         }
@@ -48,7 +48,7 @@
       },
       "parameters": {
         "title": "Parameter auswählen",
-        "description": "Wählen Sie aus, welche Parameter Sie steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
+        "description": "{count} schreibbare Parameter gefunden. Wählen Sie aus, welche Sie steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
         "data": {
           "selected_parameters": "Schreibbare Parameter"
         }

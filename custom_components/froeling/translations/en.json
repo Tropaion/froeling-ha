@@ -31,7 +31,7 @@
       },
       "sensors": {
         "title": "Select Sensors",
-        "description": "Select the sensors you want to monitor.",
+        "description": "Found {count} sensors. Select the ones you want to monitor.",
         "data": {
           "selected_sensors": "Sensors"
         }
@@ -48,7 +48,7 @@
       },
       "parameters": {
         "title": "Select Parameters",
-        "description": "Select which parameters you want to control. For safety, none are selected by default.",
+        "description": "Found {count} writable parameters. Select which ones you want to control. For safety, none are selected by default.",
         "data": {
           "selected_parameters": "Writable Parameters"
         }

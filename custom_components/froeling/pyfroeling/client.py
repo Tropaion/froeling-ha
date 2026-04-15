@@ -704,8 +704,28 @@ class FroelingClient:
             All successfully read writable parameters.
         """
         # Set of MenuStructType codes that correspond to writable parameters.
-        # PAR=0x07, PAR_DIG=0x08, PAR_ZEIT=0x0A (from const.py / service.h).
-        WRITABLE_TYPES: frozenset[int] = frozenset({0x07, 0x08, 0x0A})
+        # From const.py / service.h:
+        #   PAR      = 0x07  Numeric parameter (temperature, %, etc.)
+        #   PAR_DIG  = 0x08  Boolean/choice parameter (ja/nein, 0/1)
+        #   PAR_ZEIT = 0x0A  Time parameter (HH:MM)
+        #   PAR_SET  = 0x32  Parameter set
+        #   PAR_SET1 = 0x39  Parameter set variant 1
+        #   PAR_SET2 = 0x40  Parameter set variant 2
+        #   WORKMODE = 0x2F  Operating mode (Sommer/Übergang/Winter)
+        WRITABLE_TYPES: frozenset[int] = frozenset({
+            0x07, 0x08, 0x0A, 0x0B,  # PAR, PAR_DIG, PAR_ZEIT, PAR_WEEKDAY
+            0x2F,                      # WORKMODE (operating mode)
+            0x32, 0x39, 0x40,          # PAR_SET, PAR_SET1, PAR_SET2
+        })
+
+        # Log all unique menu types found for debugging
+        type_counts: dict[int, int] = {}
+        for item in menu_items:
+            type_counts[item.menu_type] = type_counts.get(item.menu_type, 0) + 1
+        _log.info(
+            "Menu tree types found: %s",
+            {f"0x{t:02X}": c for t, c in sorted(type_counts.items())},
+        )
 
         results: list[WritableParameter] = []
 

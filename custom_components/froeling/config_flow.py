@@ -279,13 +279,18 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             self._selected_sensors = user_input.get(CONF_SELECTED_SENSORS, [])
             return await self.async_step_access_mode()
 
+        readable = sum(1 for s in self._discovered if s.readable)
         options, preselected = _sensors_to_select_options(self._discovered)
         schema = vol.Schema({
             vol.Required(CONF_SELECTED_SENSORS, default=preselected): SelectSelector(
                 SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
             ),
         })
-        return self.async_show_form(step_id="sensors", data_schema=schema)
+        return self.async_show_form(
+            step_id="sensors",
+            data_schema=schema,
+            description_placeholders={"count": str(readable)},
+        )
 
     # ------------------------------------------------------------------
     # Step 5: Access mode (checkbox form)
@@ -368,7 +373,11 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                 SelectSelectorConfig(options=options, multiple=True, mode=SelectSelectorMode.LIST)
             ),
         })
-        return self.async_show_form(step_id="parameters", data_schema=schema)
+        return self.async_show_form(
+            step_id="parameters",
+            data_schema=schema,
+            description_placeholders={"count": str(len(self._writable_params))},
+        )
 
     # ------------------------------------------------------------------
     # Entry creation
