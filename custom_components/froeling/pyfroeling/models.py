@@ -244,3 +244,99 @@ class ConfigParameter:
     max_value: float
     default_value: float
     title: str
+
+
+@dataclass
+class MenuItem:
+    """An entry from the heater's menu tree (cmdGetMenuListFirst/Next 0x37/0x38).
+
+    The menu tree contains all parameters, sensors, and settings in a hierarchy.
+    It covers both readable sensors (MenuStructType MESSWERT, DIG_OUT, etc.) and
+    writable parameters (PAR, PAR_DIG, PAR_ZEIT).
+
+    Wire format parsed from the response payload (source: linux-p4d p4io.c:1157,
+    getMenuItem function):
+        [more:1 byte]      - 0 = end-of-list, 1 = entry follows
+        [type:1 byte]      - MenuStructType code (e.g. 0x07 = mstPar)
+        [unknown1:1 byte]  - reserved / unused byte, skipped
+        [parent:2 bytes BE]- parent node ID in the menu hierarchy
+        [child:2 bytes BE] - this entry's own node ID
+        [18 spare bytes]   - reserved fields, skipped
+        [address:2 bytes BE] - parameter/sensor register address for read/write
+        [unknown2:2 bytes] - reserved bytes, skipped
+        [description:N bytes] - null-terminated latin-1 string (the title)
+        [terminator:1 byte]   - null byte ending the title string
+        [crc:1 byte]          - frame CRC (stripped before parsing)
+
+    Fields
+    ------
+    menu_type : int
+        MenuStructType code (1 byte).  Key values:
+          0x07 (PAR)      – numeric configuration parameter (writable)
+          0x08 (PAR_DIG)  – digital/boolean parameter (writable)
+          0x0A (PAR_ZEIT) – time-programme parameter (writable)
+          0x03 (MESSWERT) – standard measured value (read-only sensor)
+    parent : int
+        Parent menu node ID, identifies where this entry sits in the hierarchy.
+    child : int
+        This entry's own node ID, used as a cursor for GET_MENU_LIST_NEXT.
+    address : int
+        16-bit register address for GET_PARAMETER / SET_PARAMETER commands.
+    title : str
+        Human-readable parameter or sensor name (German, latin-1 decoded).
+    """
+
+    menu_type: int      # MenuStructType code (e.g. 0x07=PAR, 0x03=MESSWERT)
+    parent: int         # Parent menu node ID in the heater's menu hierarchy
+    child: int          # This entry's own node ID
+    address: int        # Register address for GET_PARAMETER / SET_PARAMETER
+    title: str          # Human-readable name decoded from null-terminated latin-1
+
+
+@dataclass
+class WritableParameter:
+    """A writable parameter discovered from the menu tree with its current value.
+
+    This dataclass combines:
+      - :class:`MenuItem` metadata (from cmdGetMenuListFirst/Next): address, title,
+        menu type, and the node hierarchy used to navigate the menu.
+      - :class:`ConfigParameter` runtime state (from cmdGetParameter 0x55): the
+        current value, unit string, display digits, scale factor, and allowed range.
+
+    Only entries with menu_type in {PAR=0x07, PAR_DIG=0x08, PAR_ZEIT=0x0A} are
+    writable; the client filters to these before building WritableParameter objects.
+
+    Fields
+    ------
+    address : int
+        16-bit register address in the controller's parameter table.
+    title : str
+        Human-readable parameter name (German, from the menu tree).
+    menu_type : int
+        MenuStructType code – one of 0x07 (PAR), 0x08 (PAR_DIG), 0x0A (PAR_ZEIT).
+    value : float
+        Current parameter value scaled by factor (raw_value / factor).
+    unit : str
+        Physical unit string (e.g. "°C", "min", "%").
+    digits : int
+        Number of decimal places to display on the controller LCD.
+    factor : int
+        Scale divisor; raw integer values on the wire are divided by this.
+    min_value : float
+        Minimum allowed value (inclusive lower bound for SET_PARAMETER).
+    max_value : float
+        Maximum allowed value (inclusive upper bound for SET_PARAMETER).
+    default_value : float
+        Factory default value for this parameter.
+    """
+
+    address: int        # 16-bit register address
+    title: str          # Human-readable German name from the menu tree
+    menu_type: int      # mstPar (0x07), mstParDig (0x08), or mstParZeit (0x0A)
+    value: float        # Current value (raw_value / factor)
+    unit: str           # Physical unit string (e.g. "°C", "%", "min")
+    digits: int         # Decimal places shown on the controller LCD
+    factor: int         # Scale divisor for raw ↔ physical conversion
+    min_value: float    # Minimum allowed value (inclusive)
+    max_value: float    # Maximum allowed value (inclusive)
+    default_value: float  # Factory default value

@@ -24,6 +24,8 @@ Data model classes (returned by FroelingClient methods):
     ErrorEntry              -- single entry from the error log
     ErrorState              -- bitmask enum for error lifecycle flags
     ConfigParameter         -- configurable EEPROM parameter with limits
+    MenuItem                -- single entry from the heater's menu tree
+    WritableParameter       -- writable parameter with current value and limits
 """
 
 # ---------------------------------------------------------------------------
@@ -33,7 +35,7 @@ from .client import FroelingClient, FroelingConnectionError, FroelingError, Froe
 
 # ---------------------------------------------------------------------------
 # Re-export data model classes so callers can do:
-#   from pyfroeling import HeaterStatus, SensorValue, ...
+#   from pyfroeling import HeaterStatus, SensorValue, MenuItem, ...
 # ---------------------------------------------------------------------------
 from .models import (
     ConfigParameter,
@@ -41,8 +43,10 @@ from .models import (
     ErrorState,
     HeaterStatus,
     IoValue,
+    MenuItem,
     SensorValue,
     ValueSpec,
+    WritableParameter,
 )
 
 # Define __all__ so that ``from pyfroeling import *`` is predictable.
@@ -59,6 +63,8 @@ __all__ = [
     "ErrorState",
     "HeaterStatus",
     "IoValue",
+    "MenuItem",
     "SensorValue",
     "ValueSpec",
+    "WritableParameter",
 ]
