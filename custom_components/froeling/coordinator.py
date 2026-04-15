@@ -18,7 +18,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .const import CONF_SCAN_INTERVAL, CONF_SELECTED_SENSORS, DEFAULT_SCAN_INTERVAL, DOMAIN
+from .const import (
+    CONF_SCAN_INTERVAL,
+    CONF_SELECTED_PARAMETERS,
+    CONF_SELECTED_SENSORS,
+    CONF_WRITE_ENABLED,
+    DEFAULT_SCAN_INTERVAL,
+    DOMAIN,
+)
 from .pyfroeling import (
     ErrorEntry,
     FroelingClient,
@@ -27,6 +34,7 @@ from .pyfroeling import (
     HeaterStatus,
     SensorValue,
     ValueSpec,
+    WritableParameter,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,12 +67,19 @@ class FroelingData:
     specs:
         The full list of :class:`~pyfroeling.ValueSpec` objects discovered at
         startup.  Entities use this to know which sensors exist.
+    parameters:
+        Dict mapping 16-bit parameter address → :class:`~pyfroeling.WritableParameter`.
+        Only populated when write mode is enabled and parameter addresses are
+        configured.  Empty dict when read-only mode is in use.
     """
 
     status: HeaterStatus
     values: dict[int, SensorValue] = field(default_factory=dict)
     errors: list[ErrorEntry] = field(default_factory=list)
     specs: list[ValueSpec] = field(default_factory=list)
+    # Writable parameter snapshots – keyed by 16-bit register address.
+    # Empty when write mode is disabled (read-only entries).
+    parameters: dict[int, WritableParameter] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -82,8 +97,9 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
        is not repeated each minute.
 
     2. ``_async_update_data()`` is called by the HA scheduler every
-       SCAN_INTERVAL seconds.  It fetches status, all sensor values, and the
-       error log, bundling them into a :class:`FroelingData` snapshot.
+       SCAN_INTERVAL seconds.  It fetches status, all sensor values, the error
+       log, and (when write mode is enabled) the current writable parameter
+       values, bundling them all into a :class:`FroelingData` snapshot.
 
     On reconnect: if the TCP connection has dropped between polls, we call
     ``client.connect()`` before attempting to read data.
@@ -135,6 +151,39 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         # Keep a reference to the config entry for unique_id / logging.
         self.config_entry = config_entry
 
+        # ---------------------------------------------------------------------------
+        # Write mode configuration (populated from config_entry.data)
+        # ---------------------------------------------------------------------------
+
+        # Whether the user enabled write mode during the config flow.
+        self._write_enabled: bool = config_entry.data.get(CONF_WRITE_ENABLED, False)
+
+        # The 16-bit integer addresses of parameters the user selected for polling.
+        # Stored as a set for O(1) membership tests.
+        param_strs = config_entry.data.get(CONF_SELECTED_PARAMETERS, [])
+        self._parameter_addresses: set[int] = set()
+        for addr_str in param_strs:
+            try:
+                # Config entry stores addresses as hex strings like "0x00A3"
+                self._parameter_addresses.add(int(addr_str, 16))
+            except (ValueError, TypeError):
+                # Skip malformed entries rather than crashing at startup
+                _LOGGER.debug(
+                    "FroelingCoordinator: ignoring invalid parameter address: %r",
+                    addr_str,
+                )
+
+        # Mapping from parameter address → human-readable title.
+        # Populated from the coordinator's first successful parameter read so
+        # that subsequent polls can label parameters without extra commands.
+        self._parameter_titles: dict[int, str] = {}
+
+        _LOGGER.debug(
+            "FroelingCoordinator: write_enabled=%s, parameter_addresses=%s",
+            self._write_enabled,
+            {f"0x{a:04X}" for a in self._parameter_addresses},
+        )
+
     # ------------------------------------------------------------------
     # Setup (called once at integration load time)
     # ------------------------------------------------------------------
@@ -179,9 +228,11 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         -----
         1. Reconnect if the TCP connection has been lost since the last poll.
         2. Send GET_STATE + GET_VERSION to build a :class:`~pyfroeling.HeaterStatus`.
-        3. Send GET_VALUE / GET_DIG_OUT / etc. for every discovered sensor spec.
+        3. Send GET_VALUE / GET_DIG_OUT / etc. for every selected sensor spec.
         4. Read the error log (GET_ERROR_FIRST / _NEXT).
-        5. Bundle everything into a :class:`FroelingData` and return it.
+        5. If write mode is enabled, read the current value of every selected
+           writable parameter via GET_PARAMETER (0x55).
+        6. Bundle everything into a :class:`FroelingData` and return it.
 
         Raises
         ------
@@ -235,12 +286,99 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
                 f"Error reading from Fröling heater: {exc}"
             ) from exc
 
+        # --- Fetch writable parameter values (write mode only) ---
+        # This is done AFTER the sensor/error reads so that a failure here
+        # does not prevent the sensor data from being returned.
+        parameters: dict[int, WritableParameter] = {}
+        if self._write_enabled and self._parameter_addresses:
+            for addr in self._parameter_addresses:
+                try:
+                    # GET_PARAMETER returns the current value, limits, unit etc.
+                    param = await self.client.get_parameter(addr)
+
+                    # Cache the title once we have it (first successful read).
+                    # Subsequent reads use the cached title to avoid losing it.
+                    # Note: get_parameter returns an empty title string because
+                    # the GET_PARAMETER wire response does not carry the name.
+                    # We rely on _parameter_titles populated from config flow data.
+                    title = self._parameter_titles.get(addr, f"Parameter 0x{addr:04X}")
+
+                    parameters[addr] = WritableParameter(
+                        address=addr,
+                        title=title,
+                        # Assume numeric type; actual type is irrelevant for reading
+                        menu_type=0x07,
+                        value=param.value,
+                        unit=param.unit,
+                        digits=param.digits,
+                        factor=param.factor,
+                        min_value=param.min_value,
+                        max_value=param.max_value,
+                        default_value=param.default_value,
+                    )
+                    _LOGGER.debug(
+                        "FroelingCoordinator: parameter 0x%04X '%s' = %s %s",
+                        addr, title, param.value, param.unit,
+                    )
+
+                except Exception as exc:
+                    # A failed parameter read is non-fatal: log and continue.
+                    # The entity will show "Unavailable" until the next poll.
+                    _LOGGER.debug(
+                        "FroelingCoordinator: failed to read parameter 0x%04X: %s",
+                        addr, exc,
+                    )
+
         return FroelingData(
             status=status,
             values=values,
             errors=errors,
             specs=self._specs,
+            parameters=parameters,
         )
+
+    # ------------------------------------------------------------------
+    # Write support
+    # ------------------------------------------------------------------
+
+    async def async_write_parameter(
+        self, address: int, value: float, factor: int
+    ) -> float:
+        """Write a parameter value to the heater and refresh data.
+
+        Uses SET_PARAMETER (0x39) via the FroelingClient which handles the
+        full multi-step write sequence (send, consume two echo frames, confirm
+        via GET_PARAMETER).
+
+        The single-connection constraint is upheld inside FroelingClient:
+        no disconnect/reconnect happens during or between the write steps.
+
+        Parameters
+        ----------
+        address:
+            16-bit parameter register address to write.
+        value:
+            Physical float value to set (e.g. 65.0 for 65 °C).
+        factor:
+            Scale factor for this parameter (raw = int(value * factor)).
+
+        Returns
+        -------
+        float
+            The confirmed physical value read back from the controller after the
+            write.  May differ from ``value`` due to controller rounding/clamping.
+        """
+        _LOGGER.debug(
+            "async_write_parameter: writing 0x%04X = %s (factor=%d)",
+            address, value, factor,
+        )
+        # Delegate to the client; it handles the protocol handshake
+        confirmed = await self.client.set_parameter(address, value, factor)
+
+        # Refresh the coordinator so entities reflect the new value immediately
+        await self.async_request_refresh()
+
+        return confirmed
 
     # ------------------------------------------------------------------
     # Helpers
@@ -270,3 +408,19 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
                 pass
 
         return [s for s in self._specs if s.address in selected_addrs]
+
+    def set_parameter_title(self, address: int, title: str) -> None:
+        """Store the human-readable title for a parameter address.
+
+        Called by the number/select platforms when they are set up, allowing
+        the coordinator to label parameters with their actual names from the
+        config flow discovery rather than the generic "Parameter 0xXXXX" fallback.
+
+        Parameters
+        ----------
+        address:
+            16-bit parameter register address.
+        title:
+            Human-readable parameter name (from the config flow discovery).
+        """
+        self._parameter_titles[address] = title
