@@ -585,6 +585,185 @@ def parse_io_response(payload: bytes) -> dict[str, Any]:
     }
 
 
+def build_get_menu_list_request(first: bool) -> tuple[Command, bytes]:
+    """Build a paginated menu-tree list request.
+
+    The controller's menu tree (which contains all parameters and sensors in a
+    hierarchical structure) must be read page-by-page.  On the first call use
+    ``first=True`` (sends GET_MENU_LIST_FIRST = 0x37); on subsequent calls
+    use ``first=False`` (sends GET_MENU_LIST_NEXT = 0x38).
+
+    No payload is needed for either variant – the controller tracks pagination
+    state internally, advancing the cursor on each GET_MENU_LIST_NEXT request.
+
+    Parameters
+    ----------
+    first:
+        True for the initial request, False for continuation pages.
+
+    Returns
+    -------
+    tuple[Command, bytes]
+        ``(GET_MENU_LIST_FIRST or GET_MENU_LIST_NEXT, b"")``
+    """
+    cmd = Command.GET_MENU_LIST_FIRST if first else Command.GET_MENU_LIST_NEXT
+    return cmd, b""
+
+
+def parse_menu_entry_response(payload: bytes) -> dict[str, Any]:
+    """Parse one page of a GET_MENU_LIST_* (0x37/0x38) response.
+
+    The menu tree response delivers one entry per page.  Each entry describes a
+    single node in the controller's internal menu hierarchy.  Nodes may be
+    sensors (read-only) or parameters (writable, types PAR/PAR_DIG/PAR_ZEIT).
+
+    Wire format when ``more == 1`` (source: linux-p4d p4io.c:1157, getMenuItem):
+        [more: 1 byte]          – 1 if entry follows, 0 if end-of-list
+        [type: 1 byte]          – MenuStructType code (e.g. 0x07=mstPar)
+        [unknown1: 1 byte]      – reserved byte, skipped
+        [parent: 2 bytes BE]    – parent node ID (unsigned 16-bit)
+        [child: 2 bytes BE]     – this entry's node ID (unsigned 16-bit)
+        [18 spare bytes]        – reserved/unknown, skipped
+        [address: 2 bytes BE]   – register address for GET/SET_PARAMETER
+        [unknown2: 2 bytes]     – reserved bytes, skipped
+        [title: N bytes]        – null-terminated latin-1 description string
+
+    Total fixed bytes before the title: 1+1+1+2+2+18+2+2 = 29 bytes minimum
+    (plus at least one byte for the null terminator → 30 bytes minimum total).
+
+    Parameters
+    ----------
+    payload:
+        Raw payload bytes with CRC already stripped by the caller.
+
+    Returns
+    -------
+    dict
+        When ``more == 0`` (end-of-list sentinel):
+            ``{"more": False}``
+        When ``more == 1`` but payload is too short to contain a valid entry
+        (linux-p4d p4io.c: wrnEmpty pattern, size < 30 after the more byte):
+            ``{"more": True, "empty": True}``
+        When ``more == 1`` and payload is long enough:
+            ``{"more": True, "menu_type": int, "parent": int, "child": int,
+               "address": int, "title": str}``
+    """
+    # First byte is always the 'more' flag.
+    more: int = payload[0]
+    if more == 0:
+        # End-of-list sentinel – no further entries.
+        return {"more": False}
+
+    # Minimum meaningful payload: 1 (more) + 1 (type) + 1 (unk1) + 2 (parent)
+    # + 2 (child) + 18 (spare) + 2 (address) + 2 (unk2) + 1 (null terminator)
+    # = 30 bytes total.  Anything shorter is an "empty" entry (linux-p4d wrnEmpty).
+    if len(payload) < 30:
+        return {"more": True, "empty": True}
+
+    # --- menu type (byte 1) ---
+    menu_type: int = payload[1]
+
+    # --- unknown1 (byte 2) – skip ---
+
+    # --- parent node ID (bytes 3-4, unsigned 16-bit big-endian) ---
+    (parent,) = struct.unpack(">H", payload[3:5])
+
+    # --- child node ID (bytes 5-6, unsigned 16-bit big-endian) ---
+    (child,) = struct.unpack(">H", payload[5:7])
+
+    # --- 18 spare / reserved bytes (bytes 7-24) – skip ---
+
+    # --- register address (bytes 25-26, unsigned 16-bit big-endian) ---
+    (address,) = struct.unpack(">H", payload[25:27])
+
+    # --- unknown2 (bytes 27-28) – skip ---
+
+    # --- title string (byte 29 onwards, null-terminated latin-1) ---
+    title_raw: bytes = payload[29:]
+    null_pos = title_raw.find(b"\x00")
+    if null_pos != -1:
+        # Strip everything at and after the null terminator.
+        title_raw = title_raw[:null_pos]
+    title: str = _decode_string(title_raw)
+
+    return {
+        "more":      True,
+        "menu_type": menu_type,
+        "parent":    parent,
+        "child":     child,
+        "address":   address,
+        "title":     title,
+    }
+
+
+def build_set_parameter_request(address: int, value: int) -> tuple[Command, bytes]:
+    """Build a SET_PARAMETER (0x39) request frame payload.
+
+    Sends the target parameter address and the new raw integer value to the
+    controller.  The caller is responsible for converting the physical float
+    value to the raw integer (multiply by factor) before calling this function.
+
+    Wire format (payload only, sent after the frame header):
+        [address: 2 bytes BE]  – 16-bit unsigned register address
+        [value:   2 bytes BE]  – 16-bit unsigned raw value
+
+    Note: the value on the wire is unsigned (">HH") even though the controller
+    stores and returns signed values.  For negative physical values, multiply
+    the signed float by factor first, then pass the resulting int here and it
+    will be packed correctly as an unsigned 16-bit (two's complement).
+
+    Parameters
+    ----------
+    address:
+        16-bit parameter register address.
+    value:
+        Raw integer value to write (physical_value * factor, cast to int).
+
+    Returns
+    -------
+    tuple[Command, bytes]
+        ``(Command.SET_PARAMETER, <4-byte payload>)``
+    """
+    # Pack address and value as two consecutive unsigned 16-bit big-endian words.
+    return Command.SET_PARAMETER, struct.pack(">HH", address, value)
+
+
+def parse_set_parameter_response(payload: bytes) -> dict[str, Any]:
+    """Parse the first echo frame returned after a SET_PARAMETER (0x39) command.
+
+    After the controller accepts a SET_PARAMETER write it sends back two response
+    frames.  This function handles the FIRST frame, which echoes the address and
+    the new value back to the host for confirmation.
+
+    Wire format (unescaped, CRC stripped):
+        [address: 2 bytes BE]  – 16-bit register address (unsigned)
+        [value:   2 bytes BE]  – new value as set (signed 16-bit, big-endian)
+
+    The second echo frame is discarded by the high-level client after this parser
+    returns; it carries no additional useful data.
+
+    Parameters
+    ----------
+    payload:
+        Raw payload bytes with CRC already removed.
+
+    Returns
+    -------
+    dict
+        Keys: ``address`` (int, unsigned 16-bit) and ``value`` (int, signed 16-bit).
+    """
+    # Address: unsigned 16-bit big-endian (">H")
+    (address,) = struct.unpack(">H", payload[0:2])
+
+    # Value: signed 16-bit big-endian (">h") – the controller echoes the signed int.
+    (value,) = struct.unpack(">h", payload[2:4])
+
+    return {
+        "address": address,
+        "value":   value,
+    }
+
+
 def parse_parameter_response(payload: bytes) -> dict[str, Any]:
     """Parse a GET_PARAMETER (0x55) response payload.
 

@@ -1,7 +1,7 @@
-"""Tests for command builders and response parsers (Task 6).
+"""Tests for command builders and response parsers.
 
 Test classes:
-  - TestRequestBuilders       : all build_* functions
+  - TestRequestBuilders       : all build_* functions (including new menu/set)
   - TestParseStateResponse    : parse_state_response
   - TestParseVersionResponse  : parse_version_response
   - TestParseValueResponse    : parse_value_response (signed int)
@@ -9,6 +9,8 @@ Test classes:
   - TestParseErrorResponse    : parse_error_response (pagination)
   - TestParseIoResponse       : parse_io_response
   - TestParseParameterResponse: parse_parameter_response
+  - TestParseMenuEntryResponse: parse_menu_entry_response (new Task 2)
+  - TestSetParameterCommand   : build/parse SET_PARAMETER (new Task 2)
 """
 
 from __future__ import annotations
@@ -24,14 +26,18 @@ from custom_components.froeling.pyfroeling.commands import (
     build_get_dig_in_request,
     build_get_dig_out_request,
     build_get_error_request,
+    build_get_menu_list_request,
     build_get_parameter_request,
     build_get_state_request,
     build_get_value_list_request,
     build_get_value_request,
     build_get_version_request,
+    build_set_parameter_request,
     parse_error_response,
     parse_io_response,
+    parse_menu_entry_response,
     parse_parameter_response,
+    parse_set_parameter_response,
     parse_state_response,
     parse_value_response,
     parse_value_spec_response,
@@ -600,3 +606,195 @@ class TestParseParameterResponse:
         result = parse_parameter_response(payload)
         assert result["value"] == pytest.approx(-5.0)
         assert result["min_value"] == pytest.approx(-20.0)
+
+
+# ===========================================================================
+# TestParseMenuEntryResponse  (Task 2 additions)
+# ===========================================================================
+
+class TestParseMenuEntryResponse:
+    """Verify parse_menu_entry_response handles end-of-list, short payloads,
+    and valid menu entries with the correct wire format.
+
+    Wire format reminder (from linux-p4d p4io.c:1157 getMenuItem):
+        [more:1][type:1][unk1:1][parent:2 BE][child:2 BE][18 spare][addr:2 BE]
+        [unk2:2][title:N null-terminated latin-1]
+    Total minimum: 1+1+1+2+2+18+2+2+1(null) = 30 bytes.
+    """
+
+    def _make_menu_payload(
+        self,
+        more: int,
+        menu_type: int,
+        parent: int,
+        child: int,
+        address: int,
+        title: str,
+        unknown1: int = 0,
+        unknown2: bytes = b"\x00\x00",
+        spare: bytes = b"\x00" * 18,
+    ) -> bytes:
+        """Construct a full GET_MENU_LIST_* response payload for testing.
+
+        Assembles the bytes exactly as the controller would send them so tests
+        are byte-accurate against the real wire format.
+        """
+        title_bytes = title.encode("latin-1") + b"\x00"  # null-terminated
+        return (
+            bytes([more])                       # byte 0:  more flag
+            + bytes([menu_type])                # byte 1:  MenuStructType code
+            + bytes([unknown1])                 # byte 2:  unknown1 (skipped)
+            + struct.pack(">H", parent)         # bytes 3-4:  parent node ID
+            + struct.pack(">H", child)          # bytes 5-6:  child node ID
+            + spare                             # bytes 7-24: 18 spare bytes
+            + struct.pack(">H", address)        # bytes 25-26: register address
+            + unknown2                          # bytes 27-28: unknown2 (skipped)
+            + title_bytes                       # bytes 29+:  null-terminated title
+        )
+
+    def test_menu_entry_end_of_list(self) -> None:
+        """A payload starting with 0x00 (more=0) returns {'more': False}."""
+        result = parse_menu_entry_response(b"\x00")
+        assert result == {"more": False}
+
+    def test_menu_entry_short_payload(self) -> None:
+        """A more=1 payload shorter than 30 bytes returns the 'empty' sentinel."""
+        # Build a payload that is valid (more=1) but too short to contain all
+        # fixed fields (< 30 bytes total).  The parser should return wrnEmpty.
+        short_payload = bytes([0x01]) + b"\x07\x00" + b"\x00\x01" + b"\x00\x02"
+        # Total length: 7 bytes, well under the 30-byte minimum.
+        assert len(short_payload) < 30
+        result = parse_menu_entry_response(short_payload)
+        assert result.get("more") is True
+        assert result.get("empty") is True
+
+    def test_menu_entry_valid(self) -> None:
+        """A fully-formed 30+ byte payload is parsed into all expected fields."""
+        payload = self._make_menu_payload(
+            more      = 1,
+            menu_type = 0x07,       # PAR (numeric configurable parameter)
+            parent    = 1,
+            child     = 2,
+            address   = 0x01E0,     # Typical parameter address
+            title     = "Betriebsart",
+        )
+        result = parse_menu_entry_response(payload)
+
+        assert result["more"]      is True
+        assert result["menu_type"] == 0x07
+        assert result["parent"]    == 1
+        assert result["child"]     == 2
+        assert result["address"]   == 0x01E0
+        assert result["title"]     == "Betriebsart"
+
+    def test_menu_entry_more_flag_true(self) -> None:
+        """more field is True (bool) for a valid entry, not the integer 1."""
+        payload = self._make_menu_payload(
+            more=1, menu_type=0x07, parent=0, child=3,
+            address=0x0001, title="Test",
+        )
+        result = parse_menu_entry_response(payload)
+        # The parser should return the Python bool True, not the integer 1.
+        assert result["more"] is True
+
+    def test_menu_entry_title_latin1_decoded(self) -> None:
+        """Titles containing German latin-1 characters are decoded correctly."""
+        # "Puffertemperatur" contains no special chars, but "Außentemperatur" does.
+        payload = self._make_menu_payload(
+            more=1, menu_type=0x07, parent=0, child=1,
+            address=0x0004, title="Au\xdfentemperatur",  # \xdf = ß in latin-1
+        )
+        result = parse_menu_entry_response(payload)
+        assert "ß" in result["title"]   # latin-1 0xDF decoded as ß
+
+    def test_menu_entry_address_big_endian(self) -> None:
+        """Address bytes 25-26 are parsed as big-endian unsigned 16-bit."""
+        payload = self._make_menu_payload(
+            more=1, menu_type=0x08, parent=5, child=10,
+            address=0xABCD, title="DigParam",
+        )
+        result = parse_menu_entry_response(payload)
+        assert result["address"] == 0xABCD
+
+    def test_menu_entry_type_par_dig(self) -> None:
+        """menu_type=0x08 (PAR_DIG) is returned as-is."""
+        payload = self._make_menu_payload(
+            more=1, menu_type=0x08, parent=0, child=1,
+            address=0x0010, title="DigitalParam",
+        )
+        result = parse_menu_entry_response(payload)
+        assert result["menu_type"] == 0x08
+
+    def test_menu_entry_type_par_zeit(self) -> None:
+        """menu_type=0x0A (PAR_ZEIT) is returned as-is."""
+        payload = self._make_menu_payload(
+            more=1, menu_type=0x0A, parent=0, child=1,
+            address=0x0020, title="ZeitParam",
+        )
+        result = parse_menu_entry_response(payload)
+        assert result["menu_type"] == 0x0A
+
+
+# ===========================================================================
+# TestSetParameterCommand  (Task 2 additions)
+# ===========================================================================
+
+class TestSetParameterCommand:
+    """Verify build_set_parameter_request and parse_set_parameter_response."""
+
+    def test_set_parameter_request(self) -> None:
+        """build_set_parameter_request returns Command.SET_PARAMETER with the
+        correct 4-byte payload: [address:2 BE][value:2 BE]."""
+        cmd, payload = build_set_parameter_request(0x01E0, 750)
+
+        # Command code must be SET_PARAMETER (0x39).
+        assert cmd == Command.SET_PARAMETER
+
+        # Payload must be exactly 4 bytes: address then value, both big-endian.
+        assert len(payload) == 4
+
+        # Unpack and verify address and value are correct.
+        (addr, val) = struct.unpack(">HH", payload)
+        assert addr == 0x01E0
+        assert val  == 750
+
+    def test_set_parameter_request_address_encoding(self) -> None:
+        """Address is encoded as unsigned 16-bit big-endian in the payload."""
+        _, payload = build_set_parameter_request(0xABCD, 0)
+        (addr, _) = struct.unpack(">HH", payload)
+        assert addr == 0xABCD
+
+    def test_set_parameter_request_value_encoding(self) -> None:
+        """Value is encoded as unsigned 16-bit big-endian in the payload."""
+        _, payload = build_set_parameter_request(0x0001, 0x1234)
+        (_, val) = struct.unpack(">HH", payload)
+        assert val == 0x1234
+
+    def test_set_parameter_request_zero_value(self) -> None:
+        """A value of 0 encodes correctly."""
+        cmd, payload = build_set_parameter_request(0x0001, 0)
+        assert payload == b"\x00\x01\x00\x00"
+
+    def test_set_parameter_response(self) -> None:
+        """parse_set_parameter_response extracts address and signed value."""
+        # Build a response payload: address=0x01E0, value=750 (signed 16-bit).
+        payload = struct.pack(">Hh", 0x01E0, 750)
+        result = parse_set_parameter_response(payload)
+
+        assert result["address"] == 0x01E0
+        assert result["value"]   == 750
+
+    def test_set_parameter_response_negative_value(self) -> None:
+        """parse_set_parameter_response handles negative signed values correctly."""
+        # raw=-50 represents a negative physical value (e.g. -5.0 with factor=10).
+        payload = struct.pack(">Hh", 0x0200, -50)
+        result = parse_set_parameter_response(payload)
+
+        assert result["address"] == 0x0200
+        assert result["value"]   == -50
+
+    def test_set_parameter_response_max_address(self) -> None:
+        """parse_set_parameter_response handles the maximum address (0xFFFF)."""
+        payload = struct.pack(">Hh", 0xFFFF, 0)
+        result = parse_set_parameter_response(payload)
+        assert result["address"] == 0xFFFF
