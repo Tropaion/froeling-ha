@@ -32,10 +32,15 @@ class KnownParameter:
 
 KNOWN_BASIC_PARAMS: dict[int, KnownParameter] = {
     # --- System ---
+    # Betriebsart mapping verified on P1 firmware 50.04.04.11:
+    # Setting value 1 → heater shows "Sommerbetrieb"
+    # Setting value 2 → heater shows "Übergangsbetrieb"
+    # Therefore: 0 = Winterbetrieb, 1 = Sommerbetrieb, 2 = Übergangsbetrieb
+    # (Winter is the "default" full-heating mode at value 0)
     0x02F5: KnownParameter(
         en="Operating Mode",
         de="Betriebsart",
-        options={0: "Sommerbetrieb", 1: "Übergangsbetrieb", 2: "Winterbetrieb"},
+        options={0: "Winterbetrieb", 1: "Sommerbetrieb", 2: "Übergangsbetrieb"},
     ),
 
     # --- Boiler ---
