@@ -34,19 +34,24 @@ from typing import Optional
 _LOGGER = logging.getLogger(__name__)
 
 from .commands import (
+    _normalize_unit,
     build_check_request,
     build_get_anl_out_request,
     build_get_dig_in_request,
     build_get_dig_out_request,
     build_get_error_request,
+    build_get_menu_list_request,
     build_get_parameter_request,
     build_get_state_request,
     build_get_value_list_request,
     build_get_value_request,
     build_get_version_request,
+    build_set_parameter_request,
     parse_error_response,
     parse_io_response,
+    parse_menu_entry_response,
     parse_parameter_response,
+    parse_set_parameter_response,
     parse_state_response,
     parse_value_response,
     parse_value_spec_response,
@@ -61,8 +66,10 @@ from .models import (
     ErrorEntry,
     HeaterStatus,
     IoValue,
+    MenuItem,
     SensorValue,
     ValueSpec,
+    WritableParameter,
 )
 from .protocol import build_frame, calculate_crc
 
@@ -491,6 +498,257 @@ class FroelingClient:
             first = False
 
         return entries
+
+    async def discover_menu(self) -> list[MenuItem]:
+        """Read the full menu-tree structure from the controller.
+
+        Uses the paginated GET_MENU_LIST_FIRST (0x37) / GET_MENU_LIST_NEXT (0x38)
+        protocol to enumerate every node in the controller's internal menu
+        hierarchy.  Nodes include both read-only sensors and writable parameters.
+
+        The enumeration pattern mirrors :meth:`discover_sensors`:
+          - Send GET_MENU_LIST_FIRST on the first iteration.
+          - Send GET_MENU_LIST_NEXT on all subsequent iterations.
+          - Stop when the controller returns ``more=0`` (end-of-list) or after
+            ``_MAX_PAGES`` pages (safety guard against misbehaving firmware).
+          - Skip "empty" entries (more=1 but payload too short – linux-p4d wrnEmpty).
+          - Deduplicate by address so each register appears only once.
+
+        Returns
+        -------
+        list[MenuItem]
+            All menu entries found on the controller (sensors and parameters).
+
+        Raises
+        ------
+        FroelingConnectionError / FroelingProtocolError
+            On communication failure during any page request.
+        """
+        items: list[MenuItem] = []
+        # Track seen addresses to avoid duplicate entries (same address can
+        # appear more than once in the menu tree under different parent nodes).
+        seen_addresses: set[int] = set()
+        first = True
+
+        for page_num in range(_MAX_PAGES):
+            # Use FIRST command on the opening request, NEXT on all subsequent.
+            cmd, payload = build_get_menu_list_request(first=first)
+            raw = await self._send_and_receive(cmd, payload)
+            data = parse_menu_entry_response(raw)
+
+            if not data.get("more", False):
+                # End-of-list sentinel: controller has no more entries.
+                _log.debug(
+                    "discover_menu: received end-of-list after %d items", len(items)
+                )
+                break
+
+            # Controller sent a short/empty page (more=True but entry incomplete).
+            # linux-p4d p4io.c handles this as "wrnEmpty" – skip and continue.
+            if data.get("empty", False):
+                _log.debug(
+                    "discover_menu page %d: skipping short/empty entry", page_num
+                )
+                first = False
+                continue
+
+            address = data["address"]
+
+            # The menu tree frequently lists the same address under multiple
+            # parent nodes.  Deduplicate by address so callers see each register
+            # only once.
+            if address in seen_addresses:
+                _log.debug(
+                    "discover_menu page %d: skipping duplicate address 0x%04X '%s'",
+                    page_num, address, data["title"],
+                )
+                first = False
+                continue
+            seen_addresses.add(address)
+
+            items.append(MenuItem(
+                menu_type = data["menu_type"],
+                parent    = data["parent"],
+                child     = data["child"],
+                address   = address,
+                title     = data["title"],
+            ))
+            first = False
+
+            _log.debug(
+                "discover_menu page %d: 0x%04X type=0x%02X '%s'",
+                page_num, address, data["menu_type"], data["title"],
+            )
+        else:
+            # Loop exhausted _MAX_PAGES without hitting end-of-list.
+            _log.warning(
+                "discover_menu hit _MAX_PAGES limit (%d); list may be incomplete",
+                _MAX_PAGES,
+            )
+
+        return items
+
+    async def set_parameter(self, address: int, value: float, factor: int) -> float:
+        """Write a parameter value to the controller and confirm the new value.
+
+        The Lambdatronic protocol requires a specific multi-step write sequence:
+          1. Send SET_PARAMETER (0x39) with the address and raw integer value.
+          2. Read the FIRST echo frame – the controller echoes address + new value.
+          3. Read the SECOND echo frame – an additional confirmation frame that
+             the controller always sends after a write (discarded, no useful data).
+          4. Re-read the parameter with GET_PARAMETER (0x55) to confirm the value
+             was stored correctly in EEPROM.
+
+        All steps are executed inside the connection lock (held by
+        :meth:`_send_and_receive` for step 1; held manually for steps 2-3 via the
+        same lock context used in step 1 to prevent interleaving).
+
+        IMPORTANT: The connection is NEVER disconnected or reconnected during or
+        between steps.  All communication happens on the single persistent TCP or
+        serial connection.
+
+        Parameters
+        ----------
+        address:
+            16-bit parameter register address to write.
+        value:
+            Physical float value to set (e.g. 75.0 for 75 °C).
+        factor:
+            Scale factor for this parameter.  The raw integer sent on the wire
+            is ``int(value * factor)``.  Must be >= 1.
+
+        Returns
+        -------
+        float
+            The confirmed physical value read back from the controller after the
+            write.  This may differ slightly from ``value`` due to the controller's
+            internal rounding or range clamping.
+
+        Raises
+        ------
+        FroelingConnectionError
+            On TCP / serial communication failure.
+        FroelingProtocolError
+            If the first echo frame cannot be parsed.
+        """
+        # Convert the physical float to the raw integer value for the wire.
+        # For example: value=75.5, factor=10 → raw_value=755
+        raw_value: int = int(value * factor)
+
+        # --- Step 1: Send SET_PARAMETER and receive the first echo frame ---
+        # _send_and_receive handles the lock, frame building, and CRC verification.
+        cmd, req_payload = build_set_parameter_request(address, raw_value)
+        first_echo_raw = await self._send_and_receive(cmd, req_payload)
+
+        # Parse the first echo to confirm the controller acknowledged the write.
+        parse_set_parameter_response(first_echo_raw)
+
+        # --- Steps 2-3: Read the second echo frame (inside the connection lock) ---
+        # The Lambdatronic always sends a second confirmation frame after a write.
+        # We must consume it to keep the protocol synchronised, but its content is
+        # not useful and we intentionally ignore parse errors on it.
+        async with self._conn.lock:
+            try:
+                _resp_cmd, _size, payload_with_crc = await self._conn.read_response()
+                # Strip the CRC byte (last byte) from the second echo; ignore content.
+                _second_echo = payload_with_crc[:-1] if payload_with_crc else b""
+                _log.debug(
+                    "set_parameter: consumed second echo for address 0x%04X", address
+                )
+            except Exception as exc:
+                # Log but do NOT raise – the write already succeeded.
+                # A missing or malformed second echo is non-fatal.
+                _log.debug(
+                    "set_parameter: could not read second echo for 0x%04X: %s",
+                    address, exc,
+                )
+
+        # --- Step 4: Re-read to confirm the value was stored in EEPROM ---
+        confirmed_param = await self.get_parameter(address)
+        confirmed_value = confirmed_param.value
+
+        _log.debug(
+            "set_parameter: address=0x%04X requested=%s confirmed=%s",
+            address, value, confirmed_value,
+        )
+
+        return confirmed_value
+
+    async def get_writable_parameters(
+        self, menu_items: list[MenuItem]
+    ) -> list[WritableParameter]:
+        """Build writable parameter objects from a filtered menu-tree list.
+
+        Filters ``menu_items`` to only the writable parameter types:
+          - 0x07 (PAR)      – numeric configuration parameters
+          - 0x08 (PAR_DIG)  – digital / boolean parameters
+          - 0x0A (PAR_ZEIT) – time-programme parameters
+
+        For each writable menu item, calls :meth:`get_parameter` to fetch the
+        current value, limits, unit, scale factor, and display digits.  The two
+        results are merged into a :class:`~pyfroeling.models.WritableParameter`.
+
+        Failures for individual parameters are logged at DEBUG level and the item
+        is silently skipped so that one inaccessible parameter does not abort the
+        entire enumeration.
+
+        Parameters
+        ----------
+        menu_items:
+            List of :class:`~pyfroeling.models.MenuItem` objects as returned by
+            :meth:`discover_menu`.  Only those with writable menu_types are used.
+
+        Returns
+        -------
+        list[WritableParameter]
+            All successfully read writable parameters.
+        """
+        # Set of MenuStructType codes that correspond to writable parameters.
+        # PAR=0x07, PAR_DIG=0x08, PAR_ZEIT=0x0A (from const.py / service.h).
+        WRITABLE_TYPES: frozenset[int] = frozenset({0x07, 0x08, 0x0A})
+
+        results: list[WritableParameter] = []
+
+        for item in menu_items:
+            # Skip non-writable menu types (sensors, I/O channels, etc.).
+            if item.menu_type not in WRITABLE_TYPES:
+                continue
+
+            try:
+                # Fetch the current value and metadata via GET_PARAMETER (0x55).
+                param: ConfigParameter = await self.get_parameter(item.address)
+            except (FroelingConnectionError, FroelingProtocolError) as exc:
+                # Skip this parameter; it may be inaccessible on this model.
+                _log.debug(
+                    "get_writable_parameters: skipping address 0x%04X ('%s'): %s",
+                    item.address, item.title, exc,
+                )
+                continue
+
+            # Apply unit normalisation using the menu item title for context
+            # (e.g. "m" → "min" for runtime parameters).
+            unit: str = _normalize_unit(param.unit, item.title)
+
+            results.append(WritableParameter(
+                address       = item.address,
+                title         = item.title,           # From menu tree (has the name)
+                menu_type     = item.menu_type,
+                value         = param.value,
+                unit          = unit,
+                digits        = param.digits,
+                factor        = param.factor,
+                min_value     = param.min_value,
+                max_value     = param.max_value,
+                default_value = param.default_value,
+            ))
+
+            _log.debug(
+                "get_writable_parameters: 0x%04X '%s' = %s %s (min=%s max=%s)",
+                item.address, item.title, param.value, unit,
+                param.min_value, param.max_value,
+            )
+
+        return results
 
     # ------------------------------------------------------------------
     # Internal helpers
