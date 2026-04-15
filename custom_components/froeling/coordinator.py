@@ -421,11 +421,14 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         # Delegate to the client; it handles the protocol handshake
         confirmed = await self.client.set_parameter(address, value, factor)
 
-        # Schedule a refresh so entities update shortly after the write.
-        # Using async_request_refresh() (non-blocking) instead of async_refresh()
-        # (blocking) to avoid all entities briefly showing "unavailable" while
-        # the refresh is in progress. Entities will update within ~1 second.
-        await self.async_request_refresh()
+        # Force a full refresh so all entities (including the heater state
+        # sensor) reflect the new value immediately. Wrapped in try/except
+        # so a transient read failure after the write doesn't mark all
+        # entities as "unavailable" -- the write itself already succeeded.
+        try:
+            await self.async_refresh()
+        except Exception:
+            _LOGGER.debug("Post-write refresh failed, entities will update on next poll")
 
         return confirmed
 
