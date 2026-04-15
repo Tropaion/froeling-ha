@@ -26,6 +26,16 @@
           "serial_device": "Serial Device (e.g., /dev/ttyUSB0 or COM3)"
         }
       },
+      "discover_sensors": {
+        "title": "Scanning for Sensors"
+      },
+      "sensors": {
+        "title": "Select Sensors",
+        "description": "The heater was contacted and reported the sensors below with their current values. Select the sensors you want to monitor.",
+        "data": {
+          "selected_sensors": "Sensors"
+        }
+      },
       "access_mode": {
         "title": "Access Mode",
         "description": "Choose how the integration interacts with your heater.",
@@ -42,12 +52,8 @@
           "back_to_read_only": "No, use read-only mode"
         }
       },
-      "sensors": {
-        "title": "Select Sensors",
-        "description": "The heater was contacted and reported the sensors below with their current values. Select the sensors you want to monitor.",
-        "data": {
-          "selected_sensors": "Sensors"
-        }
+      "discover_parameters": {
+        "title": "Scanning for Parameters"
       },
       "parameters": {
         "title": "Select Parameters",
@@ -66,14 +72,19 @@
         }
       }
     },
+    "progress": {
+      "discovering_sensors": "Searching for sensors on your heater. This may take up to 60 seconds...",
+      "discovering_parameters": "Searching for writable parameters. This may take a moment..."
+    },
     "error": {
-      "cannot_connect": "Failed to connect to the heater or connection lost during sensor reading. Check your connection settings and cables. Detail: {error_detail}",
+      "cannot_connect": "Failed to connect to the heater. Check your connection settings and cables.",
       "no_sensors": "Connected successfully but no sensors were found.",
-      "unknown": "An unexpected error occurred. Detail: {error_detail}"
+      "unknown": "An unexpected error occurred."
     },
     "abort": {
       "already_configured": "This heater is already configured.",
-      "reconfigure_successful": "Connection updated successfully."
+      "reconfigure_successful": "Connection updated successfully.",
+      "discover_failed": "Sensor discovery failed. Check the connection and try again."
     }
   },
   "options": {
