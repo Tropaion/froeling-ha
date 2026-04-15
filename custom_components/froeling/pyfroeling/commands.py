@@ -60,12 +60,15 @@ _UNIT_CORRECTION: dict[str, str] = {
 # but ambiguous.  This table maps (sensor_title_substring, raw_unit) -> corrected_unit.
 # Checked AFTER _UNIT_CORRECTION, so "°" is already "°C" at this point.
 _TITLE_UNIT_CORRECTION: dict[tuple[str, str], str] = {
-    # "m" is ambiguous: could be meters, minutes, or millivolts
-    ("Lambdasonde",     "m"):  "mV",   # Lambdasondenspannung -> millivolts
-    ("Spannung",        "m"):  "mV",   # Any voltage sensor -> millivolts
+    # "m" is ambiguous: could be meters, minutes, or millivolts.
+    # Only correct for specific sensor names where the meaning is unambiguous.
+    ("Lambdasonde",     "m"):  "mV",   # Lambda probe voltage is always millivolts
     ("Betriebsstunden", "m"):  "h",    # Operating hours
     ("Laufzeit",        "m"):  "min",  # Runtime -> minutes
     ("Lastspiele",      ""):   "",     # Count, no unit
+    # NOTE: Do NOT add a generic "Spannung" -> "mV" rule here.
+    # Some voltage sensors report in V, others in mV. Only add specific
+    # sensor names where the unit is known with certainty.
 }
 
 
