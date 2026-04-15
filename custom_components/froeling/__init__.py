@@ -48,7 +48,8 @@ if TYPE_CHECKING:
 # Platform module names that HA will load.  Adding a new platform here is
 # sufficient – HA will automatically call async_setup_entry in the
 # corresponding sub-module.
-_PLATFORMS_STR: list[str] = ["sensor", "binary_sensor"]
+# "number" and "select" handle writable parameter entities (write mode only).
+_PLATFORMS_STR: list[str] = ["sensor", "binary_sensor", "number", "select"]
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,9 @@ async def async_setup_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> bool
     entry.runtime_data = coordinator
 
     # Resolve platform enum values and delegate entity creation to them.
-    platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
+    # Platform.NUMBER and Platform.SELECT are added for write mode support
+    # (they are no-ops when write mode is disabled in the config entry).
+    platforms = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT]
     await hass.config_entries.async_forward_entry_setups(entry, platforms)
 
     # Listen for options changes (e.g. polling interval) so they take
@@ -168,7 +171,7 @@ async def async_unload_entry(hass: "HomeAssistant", entry: "ConfigEntry") -> boo
 
     _LOGGER.debug("Unloading Fröling integration entry %s", entry.entry_id)
 
-    platforms = [Platform.SENSOR, Platform.BINARY_SENSOR]
+    platforms = [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.NUMBER, Platform.SELECT]
 
     # Tell HA to remove all entities registered by our platforms.
     unload_ok = await hass.config_entries.async_unload_platforms(entry, platforms)
