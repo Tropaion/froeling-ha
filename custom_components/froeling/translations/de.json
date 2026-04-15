@@ -48,9 +48,10 @@
       },
       "parameters": {
         "title": "Parameter auswählen",
-        "description": "{count} schreibbare Parameter gefunden. Wählen Sie aus, welche Sie steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
+        "description": "{count} Parameter gefunden. {hidden} Experten-Parameter sind ausgeblendet. Wählen Sie aus, welche Sie steuern möchten. Zur Sicherheit ist standardmäßig keiner ausgewählt.",
         "data": {
-          "selected_parameters": "Schreibbare Parameter"
+          "selected_parameters": "Schreibbare Parameter",
+          "show_expert": "Experten-/interne Parameter anzeigen"
         }
       },
       "reconfigure": {
