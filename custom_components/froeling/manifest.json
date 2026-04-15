@@ -9,5 +9,5 @@
   "requirements": ["pyserial-asyncio>=0.6"],
   "config_flow": true,
   "loggers": ["custom_components.froeling"],
-  "version": "0.7.2"
+  "version": "0.7.3"
 }

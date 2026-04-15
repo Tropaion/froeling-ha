@@ -332,7 +332,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_read_only(self, user_input=None) -> ConfigFlowResult:
         """Read-only selected: create entry without parameters."""
         self._write_enabled = False
-        return self._create_config_entry()
+        return await self._create_config_entry()
 
     async def async_step_read_write(self, user_input=None) -> ConfigFlowResult:
         """Read/write selected: show warning, then scan for parameters."""
@@ -343,7 +343,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_back_to_read_only(self, user_input=None) -> ConfigFlowResult:
         self._write_enabled = False
-        return self._create_config_entry()
+        return await self._create_config_entry()
 
     async def async_step_confirm_write(self, user_input=None) -> ConfigFlowResult:
         """User confirmed write mode: start parameter discovery."""
@@ -356,6 +356,11 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def _async_do_parameter_discovery(self) -> None:
         """Background task: connect, discover menu tree, read writable params."""
+        # Brief delay to let the serial bridge recover from the sensor
+        # discovery connection (EE10 and similar converters need time
+        # to accept a new TCP connection after the previous one closed)
+        await asyncio.sleep(1.0)
+
         client = self._make_client()
         try:
             await client.connect()
@@ -404,11 +409,11 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         """Parameter discovery failed: fall back to read-only."""
         _LOGGER.warning("Parameter discovery failed, falling back to read-only")
         self._write_enabled = False
-        return self._create_config_entry()
+        return await self._create_config_entry()
 
     async def async_step_create_entry(self, user_input=None) -> ConfigFlowResult:
         """Helper step called from progress_done to create the entry."""
-        return self._create_config_entry()
+        return await self._create_config_entry()
 
     # ------------------------------------------------------------------
     # Step 7: Parameter selection
@@ -417,7 +422,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_parameters(self, user_input=None) -> ConfigFlowResult:
         if user_input is not None:
             selected = user_input.get(CONF_SELECTED_PARAMETERS, [])
-            return self._create_config_entry(selected_parameters=selected)
+            return await self._create_config_entry(selected_parameters=selected)
 
         options = _params_to_select_options(self._writable_params)
         schema = vol.Schema({
@@ -431,13 +436,13 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
     # Entry creation
     # ------------------------------------------------------------------
 
-    def _create_config_entry(self, selected_parameters: list[str] | None = None) -> ConfigFlowResult:
+    async def _create_config_entry(self, selected_parameters: list[str] | None = None) -> ConfigFlowResult:
         """Build and create the config entry from accumulated flow state."""
         if self._conn_type == CONN_TYPE_SERIAL:
             unique_id = f"serial:{self._serial_device}"
         else:
             unique_id = f"{self._host}:{self._port}"
-        self.async_set_unique_id(unique_id)
+        await self.async_set_unique_id(unique_id)
         self._abort_if_unique_id_configured()
 
         data: dict[str, Any] = {
