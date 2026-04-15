@@ -436,10 +436,8 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
     def _schedule_post_write_refresh(self) -> None:
         """Reset the polling timer so the next update happens in ~2 seconds.
 
-        After a parameter write, we want sensors to refresh quickly without
-        calling async_refresh() inline (which can conflict with the connection
-        state). This temporarily shortens the update interval, then restores
-        it after one poll cycle.
+        Temporarily shortens the update interval. A one-shot listener restores
+        the normal interval after exactly one poll cycle (no duplicate polls).
         """
         from datetime import timedelta
 
@@ -447,28 +445,18 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         if not hasattr(self, '_original_interval'):
             self._original_interval = self.update_interval
 
-        # Set a very short interval so the next poll fires almost immediately
-        # (2s delay gives the heater time to settle after the write)
+        # Set a short interval so the next poll fires quickly
         self.update_interval = timedelta(seconds=2)
 
-        # After the next update completes, restore the original interval.
-        # We do this by hooking into the coordinator's listener system.
-        def _restore_interval() -> None:
+        # One-shot listener: restore normal interval after the next update
+        def _on_next_update() -> None:
             if hasattr(self, '_original_interval'):
                 self.update_interval = self._original_interval
                 del self._original_interval
-
-        # Use async_add_listener to run once after the next data update
-        remove_listener = self.async_add_listener(lambda: None)
-
-        async def _restore_after_delay() -> None:
-            """Wait for the short-interval poll, then restore normal interval."""
-            import asyncio
-            await asyncio.sleep(5)  # Enough time for one short poll to complete
-            _restore_interval()
+            # Remove ourselves so we only fire once
             remove_listener()
 
-        self.hass.async_create_task(_restore_after_delay())
+        remove_listener = self.async_add_listener(_on_next_update)
 
     def _get_selected_specs(self) -> list[ValueSpec]:
         """Return only the specs that the user selected during setup.
