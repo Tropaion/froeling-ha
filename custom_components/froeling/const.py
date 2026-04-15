@@ -79,6 +79,23 @@ CONF_SENSOR_SPECS = "sensor_specs"
 CONF_SCAN_INTERVAL = "scan_interval"
 
 # ---------------------------------------------------------------------------
+# Entity name mapping for meta-entities
+# ---------------------------------------------------------------------------
+# Since has_entity_name=False, translation_key doesn't resolve names.
+# These are the fixed names for our meta-entities (German, matching the
+# heater's language). The keys match the translation_key values used in
+# sensor.py and binary_sensor.py.
+
+ENTITY_NAME_MAP: dict[str, str] = {
+    "heater_state": "Heizungszustand",
+    "operating_mode": "Betriebsmodus",
+    "active_errors": "Aktive Fehler",
+    "error_log_entries": "Fehlerprotokoll",
+    "last_error": "Letzter Fehler",
+    "heater_error": "Heizungsfehler",
+}
+
+# ---------------------------------------------------------------------------
 # Sensor unit → HA device-class mapping
 # ---------------------------------------------------------------------------
 

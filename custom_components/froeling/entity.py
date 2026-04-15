@@ -83,14 +83,10 @@ class FroelingEntity(CoordinatorEntity[FroelingCoordinator]):
         self._attr_unique_id = f"{entry_id}_{sensor_type}_0x{address:04x}"
 
         if translation_key is not None:
-            # Use HA's i18n translation system for meta-entities.
-            # Setting _attr_translation_key tells HA to look up the name from
-            # strings.json / translations/*.json.
-            # IMPORTANT: Do NOT set _attr_name = None here! In HA, name=None
-            # with has_entity_name=True means "this entity IS the device"
-            # (no name suffix), which causes all translated entities to show
-            # just the device name without their individual names.
-            self._attr_translation_key = translation_key
+            # has_entity_name=False means translation_key doesn't work for names.
+            # Look up the name from our own mapping instead.
+            from .const import ENTITY_NAME_MAP
+            self._attr_name = ENTITY_NAME_MAP.get(translation_key, translation_key)
         else:
             # Sensor names from the heater are already in German and are used
             # directly (e.g. "Kessel Ist", "Außentemperatur").
