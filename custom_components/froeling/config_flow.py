@@ -128,11 +128,34 @@ def _sensors_to_select_options(sensors: list[DiscoveredSensor]) -> tuple[list[Se
     return options, preselected
 
 
+def _format_param_value(param: WritableParameter) -> str:
+    """Format a parameter's current value with known labels where possible.
+
+    Uses the same KNOWN_OPTION_LABELS from select.py to show readable values
+    in the config flow selection list (e.g., "Betriebsart = Übergangsbetrieb"
+    instead of "Betriebsart = 1").
+    """
+    # Import the label lookup from select.py
+    from .select import _get_option_labels
+
+    int_val = int(param.value) if param.value == int(param.value) else None
+    labels = _get_option_labels(param)
+
+    if labels and int_val is not None and int_val in labels:
+        return labels[int_val]
+
+    # No known label -- show numeric value
+    if param.value == int(param.value):
+        return str(int(param.value))
+    return f"{param.value:.1f}"
+
+
 def _params_to_select_options(params: list[WritableParameter]) -> list[SelectOptionDict]:
+    """Convert writable parameters to select options with readable labels."""
     options: list[SelectOptionDict] = []
     for param in params:
         addr_hex = f"0x{param.address:04X}"
-        val_str = str(int(param.value)) if param.value == int(param.value) else f"{param.value:.1f}"
+        val_str = _format_param_value(param)
         min_str = str(int(param.min_value)) if param.min_value == int(param.min_value) else f"{param.min_value:.1f}"
         max_str = str(int(param.max_value)) if param.max_value == int(param.max_value) else f"{param.max_value:.1f}"
         unit = param.unit.strip() if param.unit else ""
