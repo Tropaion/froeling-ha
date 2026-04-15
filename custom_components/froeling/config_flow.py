@@ -3,9 +3,12 @@
 Multi-step setup:
   1. User chooses connection type (Network TCP or USB Serial)
   2. User enters connection details + device name
-  3. Integration connects, discovers sensors, reads current values
-  4. User selects which sensors to enable
-  5. Config entry is created
+     → Integration connects, discovers sensors, reads current values
+  3. User chooses access mode (read-only or read/write)
+  4. If read/write: warning screen, then parameter discovery
+  5. User selects which sensors to enable
+  6. If write mode: user selects which writable parameters to control
+  7. Config entry is created
 
 Also provides:
   - Reconfigure flow to change connection settings
@@ -41,8 +44,10 @@ from .const import (
     CONF_HOST,
     CONF_PORT,
     CONF_SCAN_INTERVAL,
+    CONF_SELECTED_PARAMETERS,
     CONF_SELECTED_SENSORS,
     CONF_SERIAL_DEVICE,
+    CONF_WRITE_ENABLED,
     CONN_TYPE_NETWORK,
     CONN_TYPE_SERIAL,
     DEFAULT_DEVICE_NAME,
@@ -51,7 +56,7 @@ from .const import (
     MAX_SCAN_INTERVAL,
     MIN_SCAN_INTERVAL,
 )
-from .pyfroeling import FroelingClient, FroelingConnectionError, ValueSpec
+from .pyfroeling import FroelingClient, FroelingConnectionError, ValueSpec, WritableParameter
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -182,6 +187,53 @@ def _sensors_to_select_options(
     return options, preselected
 
 
+def _writable_params_to_select_options(
+    params: list[WritableParameter],
+) -> list[SelectOptionDict]:
+    """Convert writable parameters to HA select options for the parameter step.
+
+    Each option label shows the parameter's current value and limits so the user
+    can make an informed decision about which parameters to expose as controls.
+
+    Formatting rules:
+    - Numeric parameters (digits > 0 or min != max): "Title = <val> unit (min: X, max: Y)"
+    - Choice parameters (small integer range, e.g. 0-3): "Title = <val> (min: X, max: Y)"
+    - Values are shown as integers when they have no fractional part.
+    """
+    options: list[SelectOptionDict] = []
+
+    for param in params:
+        addr_hex = f"0x{param.address:04X}"
+
+        # Format the current value smartly: integer for whole numbers
+        if param.value == int(param.value):
+            val_str = str(int(param.value))
+        else:
+            val_str = f"{param.value:.1f}"
+
+        # Format min/max the same way
+        if param.min_value == int(param.min_value):
+            min_str = str(int(param.min_value))
+        else:
+            min_str = f"{param.min_value:.1f}"
+
+        if param.max_value == int(param.max_value):
+            max_str = str(int(param.max_value))
+        else:
+            max_str = f"{param.max_value:.1f}"
+
+        # Build label: include unit if present
+        unit = param.unit.strip() if param.unit else ""
+        if unit:
+            label = f"{param.title} = {val_str} {unit} (min: {min_str}, max: {max_str})"
+        else:
+            label = f"{param.title} = {val_str} (min: {min_str}, max: {max_str})"
+
+        options.append(SelectOptionDict(value=addr_hex, label=label))
+
+    return options
+
+
 def _create_client(data: dict[str, Any]) -> FroelingClient:
     """Create a FroelingClient from config entry data."""
     conn_type = data.get(CONF_CONNECTION_TYPE, CONN_TYPE_NETWORK)
@@ -196,17 +248,29 @@ def _create_client(data: dict[str, Any]) -> FroelingClient:
 # ---------------------------------------------------------------------------
 
 class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
-    """Multi-step config flow: connection type -> details -> sensor selection."""
+    """Multi-step config flow: connection type -> details -> access mode -> sensor/parameter selection."""
 
     VERSION = 1
 
     def __init__(self) -> None:
+        # Connection settings collected in the network/serial steps
         self._device_name: str = DEFAULT_DEVICE_NAME
         self._conn_type: str = CONN_TYPE_NETWORK
         self._host: str = ""
         self._port: int = 0
         self._serial_device: str = ""
+
+        # Sensors discovered during network/serial step
         self._discovered: list[DiscoveredSensor] = []
+
+        # Write mode flag: set True in async_step_read_write / async_step_confirm_write
+        self._write_enabled: bool = False
+
+        # Writable parameters discovered in async_step_confirm_write
+        self._writable_params: list[WritableParameter] = []
+
+        # Error detail for description_placeholders in error forms
+        self._error_detail: str = ""
 
     @staticmethod
     @callback
@@ -233,7 +297,11 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_network(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Collect host, port, and device name for a TCP connection."""
+        """Collect host, port, and device name for a TCP connection.
+
+        After successful sensor discovery, routes to the access_mode step
+        rather than directly to sensors (new in v0.7.0).
+        """
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -258,7 +326,8 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not self._discovered:
                     errors["base"] = "no_sensors"
                 else:
-                    return await self.async_step_sensors()
+                    # Route to access mode selection (new step)
+                    return await self.async_step_access_mode()
             finally:
                 await client.disconnect()
 
@@ -270,7 +339,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="network", data_schema=schema, errors=errors,
-            description_placeholders={"error_detail": getattr(self, '_error_detail', '')},
+            description_placeholders={"error_detail": self._error_detail},
         )
 
     # ------------------------------------------------------------------
@@ -280,7 +349,11 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_serial(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Collect serial device path and device name for a USB connection."""
+        """Collect serial device path and device name for a USB connection.
+
+        After successful sensor discovery, routes to the access_mode step
+        rather than directly to sensors (new in v0.7.0).
+        """
         errors: dict[str, str] = {}
 
         if user_input is not None:
@@ -304,7 +377,8 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not self._discovered:
                     errors["base"] = "no_sensors"
                 else:
-                    return await self.async_step_sensors()
+                    # Route to access mode selection (new step)
+                    return await self.async_step_access_mode()
             finally:
                 await client.disconnect()
 
@@ -318,13 +392,139 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     # ------------------------------------------------------------------
-    # Step 2: Sensor selection (shared by both connection types)
+    # Step 2 (NEW): Access mode menu
+    # ------------------------------------------------------------------
+
+    async def async_step_access_mode(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Show menu to choose between read-only and read/write access mode.
+
+        Read-only is the recommended and safe default.  Read/write mode allows
+        HA automations and scripts to change heater parameters, but requires
+        an additional warning step to confirm the user understands the risks.
+        """
+        return self.async_show_menu(
+            step_id="access_mode",
+            menu_options=["read_only", "read_write"],
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2a (NEW): Read-only path
+    # ------------------------------------------------------------------
+
+    async def async_step_read_only(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """User chose read-only mode.  Clear write flag and proceed to sensors."""
+        # Explicitly disable write mode
+        self._write_enabled = False
+        # Skip directly to sensor selection
+        return await self.async_step_sensors()
+
+    # ------------------------------------------------------------------
+    # Step 2b (NEW): Read/write path – warning menu
+    # ------------------------------------------------------------------
+
+    async def async_step_read_write(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """User chose read/write mode.  Show a safety warning menu before proceeding.
+
+        The warning presents two choices:
+          - confirm_write  → proceed to parameter discovery and enable write mode
+          - back_to_read_only → cancel write mode and fall back to read-only
+        """
+        return self.async_show_menu(
+            step_id="read_write_warning",
+            menu_options=["confirm_write", "back_to_read_only"],
+        )
+
+    # ------------------------------------------------------------------
+    # Step 2b-i (NEW): Confirmed write mode – discover writable parameters
+    # ------------------------------------------------------------------
+
+    async def async_step_confirm_write(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """User confirmed write mode.  Connect, discover menu tree and writable parameters.
+
+        This is a SEPARATE short-lived connection from the sensor discovery that
+        happened in async_step_network / async_step_serial.  That connection was
+        already disconnected before we reach here.  We open a new connection,
+        walk the full menu tree, read the limits / current values for every
+        writable parameter, then disconnect before continuing to sensor selection.
+
+        The 'single connection' constraint applies within each phase: we never
+        disconnect and reconnect while a sequence of commands is in progress.
+        """
+        # Build a fresh client using the previously stored connection details
+        if self._conn_type == CONN_TYPE_SERIAL:
+            client = FroelingClient(serial_device=self._serial_device)
+        else:
+            client = FroelingClient(host=self._host, port=self._port)
+
+        try:
+            await client.connect()
+
+            # Walk the full menu tree (GET_MENU_LIST_FIRST / NEXT)
+            _LOGGER.debug("config_flow: discovering menu tree for writable parameters…")
+            menu_items = await client.discover_menu()
+            _LOGGER.debug("config_flow: %d menu items discovered", len(menu_items))
+
+            # Read GET_PARAMETER for each writable item to get value + limits
+            self._writable_params = await client.get_writable_parameters(menu_items)
+            _LOGGER.debug(
+                "config_flow: %d writable parameters discovered",
+                len(self._writable_params),
+            )
+
+        except Exception as exc:
+            # If parameter discovery fails we do NOT abort – fall back to
+            # read-only mode so the user is not blocked from completing setup.
+            _LOGGER.warning(
+                "config_flow: writable parameter discovery failed (%s); "
+                "falling back to read-only mode", exc
+            )
+            self._write_enabled = False
+            self._writable_params = []
+            return await self.async_step_sensors()
+
+        finally:
+            # Always disconnect; the coordinator will open its own connection
+            # when the entry is loaded.
+            await client.disconnect()
+
+        # Enable write mode now that we have successfully discovered parameters
+        self._write_enabled = True
+
+        return await self.async_step_sensors()
+
+    # ------------------------------------------------------------------
+    # Step 2b-ii (NEW): Back to read-only from warning screen
+    # ------------------------------------------------------------------
+
+    async def async_step_back_to_read_only(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """User changed their mind on the warning screen.  Use read-only mode."""
+        self._write_enabled = False
+        return await self.async_step_sensors()
+
+    # ------------------------------------------------------------------
+    # Step 3: Sensor selection (shared by both connection types)
     # ------------------------------------------------------------------
 
     async def async_step_sensors(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Let the user select which sensors to enable."""
+        """Let the user select which sensors to enable.
+
+        After the user submits the sensor selection:
+        - If write mode is enabled AND writable parameters were discovered,
+          route to the parameter selection step.
+        - Otherwise, create the config entry directly.
+        """
         if user_input is not None:
             selected = user_input.get(CONF_SELECTED_SENSORS, [])
 
@@ -336,18 +536,15 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             await self.async_set_unique_id(unique_id)
             self._abort_if_unique_id_configured()
 
-            data: dict[str, Any] = {
-                CONF_DEVICE_NAME: self._device_name,
-                CONF_CONNECTION_TYPE: self._conn_type,
-                CONF_SELECTED_SENSORS: selected,
-            }
-            if self._conn_type == CONN_TYPE_SERIAL:
-                data[CONF_SERIAL_DEVICE] = self._serial_device
-            else:
-                data[CONF_HOST] = self._host
-                data[CONF_PORT] = self._port
+            # Store the sensor selection in flow state for when we create the entry
+            self._selected_sensors = selected
 
-            return self.async_create_entry(title=self._device_name, data=data)
+            # If write mode is active and we have writable params, go to parameters
+            if self._write_enabled and self._writable_params:
+                return await self.async_step_parameters()
+
+            # Otherwise create the entry now (read-only or no writable params found)
+            return self._create_config_entry(selected_sensors=selected)
 
         # Build options and determine preselection
         options, preselected = _sensors_to_select_options(self._discovered)
@@ -361,6 +558,78 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
         })
 
         return self.async_show_form(step_id="sensors", data_schema=schema)
+
+    # ------------------------------------------------------------------
+    # Step 4 (NEW): Parameter selection (only in write mode)
+    # ------------------------------------------------------------------
+
+    async def async_step_parameters(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Let the user choose which writable parameters to expose as controls.
+
+        Shows a multi-select list of all writable parameters discovered from
+        the heater's menu tree.  For safety, NONE are selected by default –
+        the user must explicitly opt in to each parameter they want to control.
+
+        Each option label shows: "Title = current_value unit (min: X, max: Y)"
+        so the user can understand what they are enabling.
+        """
+        if user_input is not None:
+            selected_params = user_input.get(CONF_SELECTED_PARAMETERS, [])
+            # Create the entry with both sensor and parameter selections
+            return self._create_config_entry(
+                selected_sensors=getattr(self, "_selected_sensors", []),
+                selected_params=selected_params,
+            )
+
+        # Build parameter select options from discovered writable parameters
+        param_options = _writable_params_to_select_options(self._writable_params)
+
+        schema = vol.Schema({
+            # Default is an empty list – no parameters selected (safety-first)
+            vol.Required(CONF_SELECTED_PARAMETERS, default=[]): SelectSelector(
+                SelectSelectorConfig(
+                    options=param_options, multiple=True, mode=SelectSelectorMode.LIST,
+                )
+            ),
+        })
+
+        return self.async_show_form(step_id="parameters", data_schema=schema)
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _create_config_entry(
+        self,
+        selected_sensors: list[str],
+        selected_params: list[str] | None = None,
+    ) -> ConfigFlowResult:
+        """Assemble the config entry data dict and create the entry.
+
+        Parameters
+        ----------
+        selected_sensors:
+            Hex-string addresses of sensors selected during the sensors step.
+        selected_params:
+            Hex-string addresses of writable parameters selected (may be None
+            or empty when write mode is disabled).
+        """
+        data: dict[str, Any] = {
+            CONF_DEVICE_NAME: self._device_name,
+            CONF_CONNECTION_TYPE: self._conn_type,
+            CONF_SELECTED_SENSORS: selected_sensors,
+            CONF_WRITE_ENABLED: self._write_enabled,
+            CONF_SELECTED_PARAMETERS: selected_params or [],
+        }
+        if self._conn_type == CONN_TYPE_SERIAL:
+            data[CONF_SERIAL_DEVICE] = self._serial_device
+        else:
+            data[CONF_HOST] = self._host
+            data[CONF_PORT] = self._port
+
+        return self.async_create_entry(title=self._device_name, data=data)
 
     # ------------------------------------------------------------------
     # Reconfigure
@@ -425,25 +694,31 @@ class FroelingOptionsFlow(OptionsFlow):
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Show options: polling interval and sensor re-selection."""
+        """Show options: polling interval, sensor re-selection, and (if write mode) parameter re-selection."""
         if user_input is not None:
             new_options = {
                 CONF_SCAN_INTERVAL: user_input.get(
                     CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
                 ),
             }
+            new_data = dict(self._config_entry.data)
+            # Update sensor selection if present in the form
             if CONF_SELECTED_SENSORS in user_input:
-                new_data = dict(self._config_entry.data)
                 new_data[CONF_SELECTED_SENSORS] = user_input[CONF_SELECTED_SENSORS]
-                self.hass.config_entries.async_update_entry(
-                    self._config_entry, data=new_data
-                )
+            # Update parameter selection if present in the form (write mode)
+            if CONF_SELECTED_PARAMETERS in user_input:
+                new_data[CONF_SELECTED_PARAMETERS] = user_input[CONF_SELECTED_PARAMETERS]
+            self.hass.config_entries.async_update_entry(
+                self._config_entry, data=new_data
+            )
             return self.async_create_entry(title="", data=new_options)
 
         current_interval = self._config_entry.options.get(
             CONF_SCAN_INTERVAL, DEFAULT_SCAN_INTERVAL
         )
         current_selected = self._config_entry.data.get(CONF_SELECTED_SENSORS, [])
+        current_params = self._config_entry.data.get(CONF_SELECTED_PARAMETERS, [])
+        write_enabled = self._config_entry.data.get(CONF_WRITE_ENABLED, False)
 
         # Try to discover sensors for re-selection (same approach as v0.5.1)
         sensor_options: list[SelectOptionDict] = []
@@ -474,6 +749,27 @@ class FroelingOptionsFlow(OptionsFlow):
                     options=sensor_options, multiple=True, mode=SelectSelectorMode.LIST,
                 )
             )
+
+        # Only show the parameter selector if write mode is enabled in the entry
+        if write_enabled:
+            # Build parameter options from any previously-stored parameters.
+            # We cannot re-discover here without another connection; use the
+            # stored list to allow de-selecting parameters but not adding new ones.
+            # Showing at least the currently-selected parameters is better than nothing.
+            if current_params:
+                # Generate minimal option labels from the stored hex addresses
+                # (we don't have the full parameter metadata here without connecting)
+                param_options = [
+                    SelectOptionDict(value=addr, label=addr)
+                    for addr in current_params
+                ]
+                schema_dict[vol.Required(
+                    CONF_SELECTED_PARAMETERS, default=current_params,
+                )] = SelectSelector(
+                    SelectSelectorConfig(
+                        options=param_options, multiple=True, mode=SelectSelectorMode.LIST,
+                    )
+                )
 
         return self.async_show_form(
             step_id="init", data_schema=vol.Schema(schema_dict),
