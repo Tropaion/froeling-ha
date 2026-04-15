@@ -68,42 +68,33 @@ class DiscoveredSensor:
     readable: bool       # True if get_value succeeded
 
 
-async def _discover_sensors(client: FroelingClient) -> list[DiscoveredSensor]:
-    """Discover all sensors and attempt to read their current values.
+async def _validate_and_discover(
+    client: FroelingClient,
+) -> list[DiscoveredSensor]:
+    """Connect, verify, discover sensors, and read their current values.
 
-    Phase 1: Enumerate all sensor specs from the heater (always works).
-    Phase 2: Read current values for each sensor (best-effort).
+    Uses a single continuous connection for the entire flow (connect ->
+    check -> discover -> read values). This matches v0.5.1's approach
+    which is proven to work reliably with the EE10 and other converters.
 
-    If value reading fails (connection drops, protocol desync), sensors
-    are still included in the result with value=None so the user can
-    still select them based on name and unit alone.
+    The client must already be connected before calling this function.
+
+    Raises FroelingConnectionError if the connection or protocol fails.
     """
-    # Phase 1: Discover sensor specs (this is reliable)
+    # Verify the connection with a CHECK command (protocol sync)
+    ok = await client.check_connection()
+    if not ok:
+        raise FroelingConnectionError("Heater did not respond to CHECK command")
+
+    # Discover all available sensor specs
     specs = await client.discover_sensors()
-    _LOGGER.debug("Discovered %d sensor specs, now reading values...", len(specs))
+    _LOGGER.debug("Discovered %d sensor specs, reading values...", len(specs))
 
-    # Phase 2: Read current values (best-effort)
-    # Disconnect and reconnect cleanly to flush any leftover protocol state
-    # from the discovery burst. The EE10 may also drop idle connections.
-    try:
-        await client.disconnect()
-        await client.connect()
-        # Send a CHECK command to verify the connection is alive and
-        # the protocol is in sync (this was present in v0.5.1 and missing
-        # in v0.6.0, which caused the "only one sensor" bug)
-        await client.check_connection()
-    except Exception as exc:
-        _LOGGER.warning("Could not reconnect for value reading: %s", exc)
-        # Return specs without values -- user can still select by name
-        return [
-            DiscoveredSensor(spec=s, value=None, readable=False) for s in specs
-        ]
-
+    # Read current values on the SAME connection (no disconnect/reconnect)
     discovered: list[DiscoveredSensor] = []
     failure_count = 0
-    last_error: Exception | None = None
 
-    for i, spec in enumerate(specs):
+    for spec in specs:
         try:
             sv = await client.get_value(spec.address, spec)
             discovered.append(DiscoveredSensor(
@@ -113,24 +104,21 @@ async def _discover_sensors(client: FroelingClient) -> list[DiscoveredSensor]:
 
         except Exception as exc:
             failure_count += 1
-            last_error = exc
             _LOGGER.debug(
                 "Failed to read 0x%04X '%s': %s", spec.address, spec.title, exc
             )
+            discovered.append(DiscoveredSensor(
+                spec=spec, value=None, readable=False
+            ))
 
-            # After 5 consecutive failures, the connection is dead.
-            # Raise an error so the user sees what went wrong.
+            # After 5 consecutive failures, the connection is dead
             if failure_count >= 5:
                 raise FroelingConnectionError(
                     f"Connection lost after reading {len(discovered)} of "
                     f"{len(specs)} sensors. Last successful: "
                     f"'{discovered[-1].spec.title if discovered else 'none'}'. "
-                    f"Error: {last_error}"
+                    f"Error: {exc}"
                 )
-
-            discovered.append(DiscoveredSensor(
-                spec=spec, value=None, readable=False
-            ))
 
     return discovered
 
@@ -257,8 +245,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             client = FroelingClient(host=self._host, port=self._port)
             try:
                 await client.connect()
-                self._discovered = await _discover_sensors(client)
-                await client.disconnect()
+                self._discovered = await _validate_and_discover(client)
             except FroelingConnectionError as exc:
                 _LOGGER.error("Connection error: %s", exc)
                 errors["base"] = "cannot_connect"
@@ -272,6 +259,8 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_sensors"
                 else:
                     return await self.async_step_sensors()
+            finally:
+                await client.disconnect()
 
         schema = vol.Schema({
             vol.Required(CONF_DEVICE_NAME, default=self._device_name or DEFAULT_DEVICE_NAME): str,
@@ -302,8 +291,7 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
             client = FroelingClient(serial_device=self._serial_device)
             try:
                 await client.connect()
-                self._discovered = await _discover_sensors(client)
-                await client.disconnect()
+                self._discovered = await _validate_and_discover(client)
             except FroelingConnectionError as exc:
                 _LOGGER.error("Connection error: %s", exc)
                 errors["base"] = "cannot_connect"
@@ -317,6 +305,8 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "no_sensors"
                 else:
                     return await self.async_step_sensors()
+            finally:
+                await client.disconnect()
 
         schema = vol.Schema({
             vol.Required(CONF_DEVICE_NAME, default=self._device_name or DEFAULT_DEVICE_NAME): str,
@@ -455,16 +445,17 @@ class FroelingOptionsFlow(OptionsFlow):
         )
         current_selected = self._config_entry.data.get(CONF_SELECTED_SENSORS, [])
 
-        # Try to discover sensors for re-selection
+        # Try to discover sensors for re-selection (same approach as v0.5.1)
         sensor_options: list[SelectOptionDict] = []
         preselected: list[str] = current_selected
         try:
             client = _create_client(self._config_entry.data)
-            await client.connect()
-            discovered = await _discover_sensors(client)
-            await client.disconnect()
-            sensor_options, _ = _sensors_to_select_options(discovered)
-            # Keep current selection as preselection, not the auto-detected one
+            try:
+                await client.connect()
+                discovered = await _validate_and_discover(client)
+                sensor_options, _ = _sensors_to_select_options(discovered)
+            finally:
+                await client.disconnect()
         except Exception:
             _LOGGER.warning("Options flow: could not discover sensors")
 
