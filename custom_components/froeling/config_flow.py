@@ -101,39 +101,36 @@ async def _discover_sensors(client: FroelingClient) -> list[DiscoveredSensor]:
 
     discovered: list[DiscoveredSensor] = []
     failure_count = 0
+    last_error: Exception | None = None
 
-    for spec in specs:
+    for i, spec in enumerate(specs):
         try:
             sv = await client.get_value(spec.address, spec)
             discovered.append(DiscoveredSensor(
                 spec=spec, value=sv.value, readable=True
             ))
-            failure_count = 0  # Reset on success
+            failure_count = 0
 
         except Exception as exc:
             failure_count += 1
+            last_error = exc
             _LOGGER.debug(
                 "Failed to read 0x%04X '%s': %s", spec.address, spec.title, exc
             )
+
+            # After 5 consecutive failures, the connection is dead.
+            # Raise an error so the user sees what went wrong.
+            if failure_count >= 5:
+                raise FroelingConnectionError(
+                    f"Connection lost after reading {len(discovered)} of "
+                    f"{len(specs)} sensors. Last successful: "
+                    f"'{discovered[-1].spec.title if discovered else 'none'}'. "
+                    f"Error: {last_error}"
+                )
+
             discovered.append(DiscoveredSensor(
                 spec=spec, value=None, readable=False
             ))
-
-            # After 5 consecutive failures, the connection is likely dead.
-            # Stop trying to avoid wasting time on ~100 more timeouts.
-            if failure_count >= 5:
-                _LOGGER.warning(
-                    "Stopping value reads after %d consecutive failures. "
-                    "Remaining %d sensors shown without values.",
-                    failure_count, len(specs) - len(discovered),
-                )
-                # Add remaining specs without values
-                remaining_specs = specs[len(discovered):]
-                for s in remaining_specs:
-                    discovered.append(DiscoveredSensor(
-                        spec=s, value=None, readable=False
-                    ))
-                break
 
     return discovered
 
@@ -262,11 +259,14 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                 await client.connect()
                 self._discovered = await _discover_sensors(client)
                 await client.disconnect()
-            except FroelingConnectionError:
+            except FroelingConnectionError as exc:
+                _LOGGER.error("Connection error: %s", exc)
                 errors["base"] = "cannot_connect"
-            except Exception:
+                self._error_detail = str(exc)
+            except Exception as exc:
                 _LOGGER.exception("Unexpected error during network setup")
                 errors["base"] = "unknown"
+                self._error_detail = str(exc)
             else:
                 if not self._discovered:
                     errors["base"] = "no_sensors"
@@ -274,13 +274,14 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                     return await self.async_step_sensors()
 
         schema = vol.Schema({
-            vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
-            vol.Required(CONF_HOST): str,
-            vol.Required(CONF_PORT): int,
+            vol.Required(CONF_DEVICE_NAME, default=self._device_name or DEFAULT_DEVICE_NAME): str,
+            vol.Required(CONF_HOST, default=self._host or vol.UNDEFINED): str,
+            vol.Required(CONF_PORT, default=self._port or vol.UNDEFINED): int,
         })
 
         return self.async_show_form(
             step_id="network", data_schema=schema, errors=errors,
+            description_placeholders={"error_detail": getattr(self, '_error_detail', '')},
         )
 
     # ------------------------------------------------------------------
@@ -303,11 +304,14 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                 await client.connect()
                 self._discovered = await _discover_sensors(client)
                 await client.disconnect()
-            except FroelingConnectionError:
+            except FroelingConnectionError as exc:
+                _LOGGER.error("Connection error: %s", exc)
                 errors["base"] = "cannot_connect"
-            except Exception:
+                self._error_detail = str(exc)
+            except Exception as exc:
                 _LOGGER.exception("Unexpected error during serial setup")
                 errors["base"] = "unknown"
+                self._error_detail = str(exc)
             else:
                 if not self._discovered:
                     errors["base"] = "no_sensors"
@@ -315,8 +319,8 @@ class FroelingConfigFlow(ConfigFlow, domain=DOMAIN):
                     return await self.async_step_sensors()
 
         schema = vol.Schema({
-            vol.Required(CONF_DEVICE_NAME, default=DEFAULT_DEVICE_NAME): str,
-            vol.Required(CONF_SERIAL_DEVICE): str,
+            vol.Required(CONF_DEVICE_NAME, default=self._device_name or DEFAULT_DEVICE_NAME): str,
+            vol.Required(CONF_SERIAL_DEVICE, default=self._serial_device or vol.UNDEFINED): str,
         })
 
         return self.async_show_form(

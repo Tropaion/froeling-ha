@@ -44,9 +44,9 @@
       }
     },
     "error": {
-      "cannot_connect": "Failed to connect to the heater. Check your connection settings and cables.",
+      "cannot_connect": "Failed to connect to the heater or connection lost during sensor reading. Check your connection settings and cables. Detail: {error_detail}",
       "no_sensors": "Connected successfully but no sensors were found.",
-      "unknown": "An unexpected error occurred."
+      "unknown": "An unexpected error occurred. Detail: {error_detail}"
     },
     "abort": {
       "already_configured": "This heater is already configured.",

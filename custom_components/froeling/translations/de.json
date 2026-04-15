@@ -44,9 +44,9 @@
       }
     },
     "error": {
-      "cannot_connect": "Verbindung zur Heizung fehlgeschlagen. Überprüfen Sie Ihre Verbindungseinstellungen und Kabel.",
+      "cannot_connect": "Verbindung zur Heizung fehlgeschlagen oder Verbindung beim Sensorlesen verloren. Überprüfen Sie Ihre Verbindungseinstellungen und Kabel. Detail: {error_detail}",
       "no_sensors": "Verbindung erfolgreich, aber es wurden keine Sensoren gefunden.",
-      "unknown": "Ein unerwarteter Fehler ist aufgetreten."
+      "unknown": "Ein unerwarteter Fehler ist aufgetreten. Detail: {error_detail}"
     },
     "abort": {
       "already_configured": "Diese Heizung ist bereits konfiguriert.",
