@@ -26,11 +26,34 @@
           "serial_device": "Serial Device (e.g., /dev/ttyUSB0 or COM3)"
         }
       },
+      "access_mode": {
+        "title": "Access Mode",
+        "description": "Choose how the integration interacts with your heater.",
+        "menu_options": {
+          "read_only": "Read-only (recommended)",
+          "read_write": "Read/Write — allows changing heater parameters"
+        }
+      },
+      "read_write_warning": {
+        "title": "Write Mode Warning",
+        "description": "Write mode allows changing heater parameters from Home Assistant. Incorrect values could affect heater operation. Only enable if you understand the risks.",
+        "menu_options": {
+          "confirm_write": "Yes, enable write mode",
+          "back_to_read_only": "No, use read-only mode"
+        }
+      },
       "sensors": {
         "title": "Select Sensors",
         "description": "The heater was contacted and reported the sensors below with their current values. Select the sensors you want to monitor.",
         "data": {
           "selected_sensors": "Sensors"
+        }
+      },
+      "parameters": {
+        "title": "Select Parameters",
+        "description": "The following writable parameters were found on your heater. Select which ones you want to control from Home Assistant. For safety, none are selected by default.",
+        "data": {
+          "selected_parameters": "Writable Parameters"
         }
       },
       "reconfigure": {
@@ -60,7 +83,8 @@
         "description": "Adjust polling interval and sensor selection.",
         "data": {
           "scan_interval": "Polling interval (seconds)",
-          "selected_sensors": "Sensors"
+          "selected_sensors": "Sensors",
+          "selected_parameters": "Writable Parameters"
         }
       }
     }

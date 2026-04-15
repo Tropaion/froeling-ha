@@ -54,6 +54,15 @@ DEFAULT_DEVICE_NAME = "Fröling Heater"
 # Keys stored in config_entry.data (selected sensors from setup flow).
 CONF_SELECTED_SENSORS = "selected_sensors"
 
+# Whether write mode was enabled during the config flow.
+# If True, the coordinator will also poll writable parameters and the
+# number/select platforms will create control entities.
+CONF_WRITE_ENABLED = "write_enabled"
+
+# List of writable parameter addresses (as hex strings, e.g. "0x00A3")
+# that the user selected for control during the config flow.
+CONF_SELECTED_PARAMETERS = "selected_parameters"
+
 # Keys stored in config_entry.options (user-adjustable settings).
 CONF_SCAN_INTERVAL = "scan_interval"
 
