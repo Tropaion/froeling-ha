@@ -418,13 +418,18 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
             "async_write_parameter: writing 0x%04X = %s (factor=%d)",
             address, value, factor,
         )
-        # Delegate to the client; it handles the protocol handshake
+        # Delegate to the client; it handles the protocol handshake.
+        # set_parameter() sends the write, reads two echo frames, and
+        # re-reads the parameter with GET_PARAMETER to confirm (~1-2s total).
         confirmed = await self.client.set_parameter(address, value, factor)
 
-        # Schedule a background refresh to confirm the written value.
-        # The entity already shows the new value optimistically, so this
-        # refresh is just for confirmation. No need to block or rush.
-        await self.async_request_refresh()
+        # Update the coordinator's data directly with the confirmed value
+        # instead of triggering a full poll (which reads ALL sensors and
+        # takes 30-60s). The optimistic entity update already shows the
+        # new value; this just updates the coordinator's backing data so
+        # the next regular poll doesn't revert it.
+        if self.data and address in self.data.parameters:
+            self.data.parameters[address].value = confirmed
 
         return confirmed
 
