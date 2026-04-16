@@ -518,6 +518,11 @@ def parse_error_response(payload: bytes) -> dict[str, Any]:
     if more == 0:
         return {"more": False}
 
+    # Short payload guard (similar to value spec's size < 11 check).
+    # Need at least: more(1) + number(2) + info(1) + state(1) + time(6) = 11 bytes
+    if len(payload) < 11:
+        return {"more": True, "empty": True}
+
     # --- error number (2 bytes, unsigned big-endian) ---
     (number,) = struct.unpack(">H", payload[1:3])
 

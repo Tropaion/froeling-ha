@@ -421,11 +421,10 @@ class FroelingCoordinator(DataUpdateCoordinator[FroelingData]):
         # Delegate to the client; it handles the protocol handshake
         confirmed = await self.client.set_parameter(address, value, factor)
 
-        # Trigger an immediate poll by setting the next update to 1 second.
-        # After that poll completes, the normal interval is restored.
-        # This is more reliable than async_refresh() which can fail or
-        # conflict with the connection state after a write.
-        self._schedule_post_write_refresh()
+        # Schedule a background refresh to confirm the written value.
+        # The entity already shows the new value optimistically, so this
+        # refresh is just for confirmation. No need to block or rush.
+        await self.async_request_refresh()
 
         return confirmed
 

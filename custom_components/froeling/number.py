@@ -167,12 +167,13 @@ class FroelingNumberEntity(FroelingEntity, NumberEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return the current parameter value from the coordinator snapshot.
+        """Return the current parameter value.
 
-        Returns None if the parameter address is absent from coordinator data
-        (e.g. the controller did not respond during the last poll cycle).
-        HA will then show "Unavailable" for this entity.
+        Returns optimistic value if a write is pending, otherwise from coordinator.
         """
+        if getattr(self, '_optimistic_value', None) is not None:
+            return self._optimistic_value
+
         if self.coordinator.data is None:
             return None
         wp = self.coordinator.data.parameters.get(self._address)
@@ -181,24 +182,26 @@ class FroelingNumberEntity(FroelingEntity, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Write a new value to the heater parameter.
 
-        Called by HA when the user submits a new value through the UI or an
-        automation.  Delegates to the coordinator which handles the full
-        multi-step SET_PARAMETER / confirmation sequence and then triggers a
-        data refresh so the entity shows the confirmed value immediately.
-
-        Parameters
-        ----------
-        value:
-            The new physical value to set (already validated against min/max
-            by HA before this method is called).
+        Optimistically updates the UI immediately, then writes to the heater.
         """
         _LOGGER.debug(
             "FroelingNumberEntity: setting 0x%04X '%s' to %s",
             self._address, self.name, value,
         )
-        confirmed = await self.coordinator.async_write_parameter(
-            self._address, value, self._factor
-        )
-        _LOGGER.debug(
-            "FroelingNumberEntity: 0x%04X confirmed = %s", self._address, confirmed
-        )
+        # Optimistic: show the new value immediately
+        self._optimistic_value = value
+        self.async_write_ha_state()
+
+        try:
+            await self.coordinator.async_write_parameter(
+                self._address, value, self._factor
+            )
+        except Exception as exc:
+            _LOGGER.error("Failed to write 0x%04X: %s", self._address, exc)
+            self._optimistic_value = None
+            self.async_write_ha_state()
+
+    def _handle_coordinator_update(self) -> None:
+        """Clear optimistic state when coordinator confirms the real value."""
+        self._optimistic_value = None
+        super()._handle_coordinator_update()

@@ -201,45 +201,54 @@ class FroelingSelectEntity(FroelingEntity, SelectEntity):
     def current_option(self) -> str | None:
         """Return the currently active option label.
 
-        Reads the current value from the coordinator snapshot, converts it to
-        the corresponding label string. Returns None if the parameter is absent.
+        Returns the optimistic value if a write is pending, otherwise
+        reads from the coordinator snapshot.
         """
+        # Return optimistic value immediately after a write
+        if getattr(self, '_optimistic_option', None) is not None:
+            return self._optimistic_option
+
         if self.coordinator.data is None:
             return None
         wp = self.coordinator.data.parameters.get(self._address)
         if wp is None:
             return None
-        # Convert the numeric value to the label (or numeric string as fallback)
         int_val = int(wp.value)
         if self._labels:
             return self._labels.get(int_val, str(int_val))
         return str(int_val)
 
+    def _handle_coordinator_update(self) -> None:
+        """Clear optimistic state when the coordinator confirms the real value."""
+        self._optimistic_option = None
+        super()._handle_coordinator_update()
+
     async def async_select_option(self, option: str) -> None:
         """Write the selected option to the heater.
 
-        Called by HA when the user picks a new option in the UI or an
-        automation calls select.select_option.
-
-        Parameters
-        ----------
-        option:
-            The option string (e.g. "2") chosen by the user.  Converted to
-            a float before being sent to the coordinator.
+        Optimistically updates the UI immediately, then writes to the heater
+        in the background. The next poll cycle will confirm the actual value.
         """
         _LOGGER.debug(
             "FroelingSelectEntity: setting 0x%04X '%s' to option '%s'",
             self._address, self.name, option,
         )
+        # Optimistically update the UI immediately so the user sees feedback
+        self._optimistic_option = option
+        self.async_write_ha_state()
+
         # Convert the label back to the numeric value
         int_value = self._label_to_value.get(option)
         if int_value is None:
-            # Fallback: try to parse as number directly
             int_value = int(option)
         value = float(int_value)
-        confirmed = await self.coordinator.async_write_parameter(
-            self._address, value, self._factor
-        )
-        _LOGGER.debug(
-            "FroelingSelectEntity: 0x%04X confirmed = %s", self._address, confirmed
-        )
+
+        try:
+            await self.coordinator.async_write_parameter(
+                self._address, value, self._factor
+            )
+        except Exception as exc:
+            # Write failed -- revert optimistic state
+            _LOGGER.error("Failed to write 0x%04X: %s", self._address, exc)
+            self._optimistic_option = None
+            self.async_write_ha_state()

@@ -491,8 +491,12 @@ class FroelingClient:
             data = parse_error_response(raw)
 
             if not data.get("more", False):
-                # End-of-list received.
                 break
+
+            # Skip short/empty error entries (malformed response)
+            if data.get("empty", False):
+                first = False
+                continue
 
             entries.append(ErrorEntry(
                 number    = data["number"],
